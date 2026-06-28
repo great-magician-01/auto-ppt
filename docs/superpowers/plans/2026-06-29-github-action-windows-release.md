@@ -36,7 +36,7 @@
 
 **Interfaces:**
 - Consumes: 无(独立 workflow)
-- Produces: 一个可被 GitHub Actions 加载的 workflow,在 push 到 `main` 或打 `v*` 标签时触发,产出 Windows 安装包并发布到 Release。
+- Produces: 一个可被 GitHub Actions 加载的 workflow,在 push 到 `master` 或打 `v*` 标签时触发,产出 Windows 安装包并发布到 Release。
 
 - [ ] **Step 1: 创建 workflow 文件**
 
@@ -48,7 +48,7 @@ name: Release
 on:
   push:
     branches:
-      - main
+      - master
     tags:
       - 'v*'
 
@@ -61,7 +61,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 设置 Node 和 Rust 并构建发布
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 编译产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
