@@ -45,7 +45,7 @@ npm run dev
 |---|---|---|
 | API 地址 | 提供商 base，程序自动补 `/chat/completions` | `https://api.deepseek.com` |
 | API Key | 你的密钥 | `sk-...` |
-| 模型 | 可点「获取列表」从 `/models` 拉取，或自定义输入 | `deepseek-chat` |
+| 模型 | 可点「获取列表」从 `/models` 拉取，或自定义输入 | `deepseek-v4-flash` |
 
 > OpenAI 官方填 `https://api.openai.com/v1`。
 

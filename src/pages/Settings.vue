@@ -136,7 +136,7 @@ async function save() {
         <span class="lab">
           <Icon name="pencil" :size="14" /> 自定义模型 (model)
         </span>
-        <input v-model="form.model" placeholder="deepseek-chat" />
+        <input v-model="form.model" placeholder="deepseek-v4-flash" />
       </label>
 
       <div class="field">
