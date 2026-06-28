@@ -135,7 +135,13 @@ export async function startOutline(
         html_content: null,
       });
     }
-    await addMessage(projectId, "assistant", `已生成大纲（${parsed.slides.length} 页）与设计系统。`);
+    await addMessage(
+      projectId,
+      "assistant",
+      `已生成大纲（${parsed.slides.length} 页）与设计系统。`,
+      null,
+      genState.reasoning
+    );
     genState.status = "大纲已生成，可进入编辑器逐页生成 HTML";
   } catch (e) {
     if (isCancelled(e)) {
@@ -216,7 +222,13 @@ export async function sendOutlineChat(
         html_content: null,
       });
     }
-    await addMessage(projectId, "assistant", `已按指令更新大纲（${parsed.slides.length} 页）。`);
+    await addMessage(
+      projectId,
+      "assistant",
+      `已按指令更新大纲（${parsed.slides.length} 页）。`,
+      null,
+      genState.reasoning
+    );
     genState.status = "大纲已更新";
   } catch (e) {
     if (isCancelled(e)) {
@@ -287,7 +299,8 @@ export async function startSlide(
       projectId,
       "assistant",
       `第 ${idx + 1} 页已生成 · 版式 ${kind} · ${bulletsLen} 个要点 · ${outlineSlide.title}`,
-      slide.id
+      slide.id,
+      genState.reasoning
     );
     genState.status = `第 ${idx + 1} 页已生成`;
     // 多模态自检（单页生成入口）
@@ -376,7 +389,13 @@ export async function selfCheckSlide(
     if (themeOk) {
       slide.html_content = html;
       await upsertSlide(slide);
-      await addMessage(projectId, "assistant", `已自检并改进第 ${idx + 1} 页`, slide.id);
+      await addMessage(
+        projectId,
+        "assistant",
+        `已自检并改进第 ${idx + 1} 页`,
+        slide.id,
+        genState.reasoning
+      );
       genState.status = `第 ${idx + 1} 页已自检改进`;
     } else {
       // 结构不合法 或 主题被改动 → 还原原页，不写坏数据
@@ -468,7 +487,7 @@ export async function sendChat(
     }
     cur.html_content = cleanHtml(genState.content);
     await upsertSlide(cur);
-    await addMessage(projectId, "assistant", "已按指令更新当前页", cur.id);
+    await addMessage(projectId, "assistant", "已按指令更新当前页", cur.id, genState.reasoning);
     genState.status = "已更新";
   } catch (e) {
     if (isCancelled(e)) {

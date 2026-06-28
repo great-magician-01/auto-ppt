@@ -39,6 +39,8 @@ export interface Message {
   slide_id?: number | null;
   role: ChatRole;
   content: string;
+  /** 思考过程（仅助手完成消息可能附带，由生成/对话结束时回填） */
+  reasoning?: string | null;
   created_at?: string;
 }
 
@@ -153,12 +155,13 @@ export async function addMessage(
   projectId: number,
   role: ChatRole,
   content: string,
-  slideId?: number | null
+  slideId?: number | null,
+  reasoning?: string | null
 ) {
   const d = await db();
   await d.execute(
-    "INSERT INTO messages(project_id, slide_id, role, content) VALUES(?, ?, ?, ?)",
-    [projectId, slideId ?? null, role, content]
+    "INSERT INTO messages(project_id, slide_id, role, content, reasoning) VALUES(?, ?, ?, ?, ?)",
+    [projectId, slideId ?? null, role, content, reasoning ?? null]
   );
 }
 

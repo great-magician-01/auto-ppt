@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { listProjects, createProject, getFirstSlide } from "../lib/db";
 import { STYLE_PRESETS } from "../lib/styles";
+import { genState } from "../lib/genStore";
 import type { Project } from "../lib/db";
 import Icon from "../components/Icon.vue";
 import SlidePreview from "../components/SlidePreview.vue";
@@ -14,6 +15,8 @@ const showNew = ref(false);
 const title = ref("");
 const topic = ref("");
 const selectedStyle = ref<string | null>(null);
+// 全局生成锁：genState 单例 running 时禁止新建项目（避免并发破坏单例状态）
+const busy = computed(() => genState.running);
 
 onMounted(load);
 
@@ -30,6 +33,7 @@ async function load() {
 }
 
 async function create() {
+  if (genState.running) return; // 兜底：生成中不新建
   if (!topic.value.trim()) return;
   const t = title.value.trim() || topic.value.slice(0, 20);
   const id = await createProject(t, topic.value.trim(), selectedStyle.value);
@@ -46,11 +50,12 @@ function open(p: Project) {
   <div class="page">
     <div class="row" style="justify-content: space-between">
       <h2>项目</h2>
-      <button class="primary" @click="showNew = !showNew">
+      <button class="primary" :disabled="busy" @click="showNew = !showNew">
         <Icon name="plus" :size="14" />
         {{ showNew ? "取消" : "新建项目" }}
       </button>
     </div>
+    <div v-if="busy" class="muted lock-hint">生成中，请等待当前任务完成后再新建项目…</div>
 
     <div v-if="showNew" class="panel new">
       <div class="col">
@@ -88,7 +93,7 @@ function open(p: Project) {
             </button>
           </div>
         </div>
-        <button class="primary" :disabled="!topic.trim()" @click="create">
+        <button class="primary" :disabled="busy || !topic.trim()" @click="create">
           创建并生成大纲
         </button>
       </div>
@@ -114,6 +119,10 @@ function open(p: Project) {
 <style scoped>
 .page {
   padding: 24px;
+}
+.lock-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
 }
 .panel {
   background: var(--panel);

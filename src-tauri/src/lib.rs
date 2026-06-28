@@ -402,6 +402,12 @@ pub fn run() {
             sql: include_str!("../migrations/004_ai_configs.sql"),
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 5,
+            description: "add reasoning column to messages for thinking persistence",
+            sql: include_str!("../migrations/005_add_reasoning_to_messages.sql"),
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

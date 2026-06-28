@@ -56,7 +56,11 @@ const currentHtml = computed(() => {
     genState.slideIdx === currentIdx.value &&
     (genState.phase === "slide" || genState.phase === "chat")
   ) {
-    return cleanHtml(genState.content);
+    // 流式内容非空才用实时流；首个 chunk 到达前回退原页，
+    // 避免发起对话修改瞬间预览变空白（slide 新页无旧内容则仍空，行为不变）
+    const live = cleanHtml(genState.content);
+    if (live) return live;
+    return cur.html_content ?? "";
   }
   return cur.html_content ?? "";
 });
@@ -98,13 +102,13 @@ watch(currentIdx, () => {
 });
 
 // 生成全部时自动翻页：跟随 store 推进的 slideIdx
+// 条件放宽为「本项目的生成」即可——startAll 在每页完成时推进 slideIdx，此刻 running
+// 已被 startSlide 的 finally 置 false，若仍按 running/phase 闸会漏掉跨页间隙导致卡页。
+// 手动翻页只写 currentIdx 不动 slideIdx，故不会误触。
 watch(
   () => genState.slideIdx,
   (idx) => {
-    if (
-      runningHere.value &&
-      (genState.phase === "slide" || genState.phase === "chat")
-    ) {
+    if (genState.projectId === projectId) {
       currentIdx.value = Math.min(idx, Math.max(0, slides.value.length - 1));
     }
   }
@@ -226,6 +230,7 @@ async function doExport() {
         :messages="messages"
         :running="runningOnCurrent"
         :reasoning="runningOnCurrent ? genState.reasoning : ''"
+        :locked="busy"
         :disabled="!current?.html_content"
         placeholder="对当前页的修改指令…（Ctrl/⌘+Enter 发送）"
         @send="onChat"

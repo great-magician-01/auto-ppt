@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-AutoPPT — a Tauri 2 desktop app that uses an OpenAI-compatible LLM to generate PowerPoint decks. Vue 3 + TypeScript (Vite) frontend, Rust backend. The app UI and all LLM prompts are in Chinese; keep user-facing strings/prompts in Chinese when editing.
+纸光幻演 (AutoPPT) — a Tauri 2 desktop app that generates PowerPoint decks from an LLM. It supports **multiple AI configurations**, each either OpenAI-compatible (DeepSeek, OpenAI, …) or Anthropic-native (Claude), with exactly one enabled at a time. Vue 3 + TypeScript (Vite) frontend, Rust backend. The app UI and all LLM prompts are in Chinese; keep user-facing strings/prompts in Chinese when editing.
 
 ## Commands
 
@@ -22,21 +22,21 @@ The Tauri CLI (`@tauri-apps/cli`) is a devDependency, so `npm run tauri …` wor
 
 Standard Tauri two-process split, but the responsibilities are asymmetric and worth knowing:
 
-**Frontend (`src/`) owns the product logic.** Vue 3 `<script setup>` SFCs, `vue-router` (routes: `/`, `/projects`, `/settings`, `/outline/:id`, `/editor/:id`, all lazy). The DB is *also* driven from the frontend via `@tauri-apps/plugin-sql` (SQLite file `auto_ppt.db`), with typed query helpers in `src/lib/db.ts`. Schema lives in `src-tauri/migrations/` and is applied by the Rust side at startup (`lib.rs` → `tauri_plugin_sql::Migration`): `001_init.sql` (projects/slides/messages/settings/exports), `002_add_style.sql` (`projects.style`), `003_add_slide_id_to_messages.sql` (`messages.slide_id` for per-page chat).
+**Frontend (`src/`) owns the product logic.** Vue 3 `<script setup>` SFCs, `vue-router` (routes: `/`, `/projects`, `/settings`, `/outline/:id`, `/editor/:id`, all lazy). The DB is *also* driven from the frontend via `@tauri-apps/plugin-sql` (SQLite file `auto_ppt.db`), with typed query helpers in `src/lib/db.ts`. Schema lives in `src-tauri/migrations/` and is applied by the Rust side at startup (`lib.rs` → `tauri_plugin_sql::Migration`): `001_init.sql` (projects/slides/messages/settings/exports), `002_add_style.sql` (`projects.style`), `003_add_slide_id_to_messages.sql` (`messages.slide_id` for per-page chat), `004_ai_configs.sql` (the `ai_configs` multi-AI table), `005_add_reasoning_to_messages.sql` (`messages.reasoning` for persisted thinking).
 
-**Backend (`src-tauri/src/lib.rs`) does only what the browser sandbox can't:** proxy the LLM API with SSE streaming (`chat_stream`), fetch the model list (`list_models`), and write exported files outside the fs scope (`save_file`). `main.rs` is a thin bin that just calls `tauri_app_lib::run()`; all real Rust code is in `lib.rs`. (The `[lib]` name `tauri_app_lib` + `staticlib/cdylib/rlib` crate-types is the standard Tauri 2 mobile-ready split — don't "fix" the apparent redundancy.)
+**Backend (`src-tauri/src/lib.rs`) does only what the browser sandbox can't:** proxy the LLM API with SSE streaming (`chat_stream`, dispatching OpenAI *or* Anthropic format), abort an in-flight stream (`cancel_chat`), fetch the model list (`list_models`, also format-aware), and write exported files outside the fs scope (`save_file`). `main.rs` is a thin bin that just calls `tauri_app_lib::run()`; all real Rust code is in `lib.rs`. (The `[lib]` name `tauri_app_lib` + `staticlib/cdylib/rlib` crate-types is the standard Tauri 2 mobile-ready split — don't "fix" the apparent redundancy.) Frontend `src/main.ts` `bootstrap()` runs `ensureLegacyImport()` once at startup (see Multi-AI), always disables the context menu, and in production blocks devtools shortcuts (F12 / Ctrl+Shift+I/J/C).
 
 ### The generation pipeline (orchestrated by a global store)
 
-Generation is **not** owned by any single component — it lives in `src/lib/genStore.ts`, which exports a module-level reactive `genState` (the single source of truth: `running`, `phase`, `projectId`, `slideIdx`, `reasoning`, `content`, `status`, `error`). Because it is module-level, a generation run **survives component unmount/remount** — you can navigate away mid-stream and come back to live progress. Both `Outline.vue` and `Editor.vue` merely *read* `genState` (live preview from `genState.content`) and *watch* `genState.running` to reload the final DB state when a background run finishes. Prompts live in `src/lib/prompt.ts`. Phases: `idle | outline | outline-chat | slide | chat`.
+Generation is **not** owned by any single component — it lives in `src/lib/genStore.ts`, which exports a module-level reactive `genState` (the single source of truth: `running`, `phase`, `projectId`, `slideIdx`, `reasoning`, `content`, `status`, `error`, `cancelled`). Because it is module-level, a generation run **survives component unmount/remount** — you can navigate away mid-stream and come back to live progress. Both `Outline.vue` and `Editor.vue` merely *read* `genState` (live preview from `genState.content`) and *watch* `genState.running` to reload the final DB state when a background run finishes. Prompts live in `src/lib/prompt.ts`. Phases: `idle | outline | outline-chat | slide | chat | selfcheck`.
 
 The flow spans two pages — ProjectList creates a project → `/outline/:id` → `/editor/:id`:
 
-1. **Outline + design system** (`Outline.vue` → `startOutline()`, phase `outline`) — `chatOnce(..., jsonMode=true)` → Rust `chat_stream` POSTs `{api_base}/chat/completions` with `response_format: json_object`. Returns `{design_tokens, theme_css, slides[], style?}`. `parseOutline` tolerantly extracts the JSON (fence-stripping + brace-balancing) and **retries once** on parse failure. Stored on `projects` (design_tokens/theme_css/style) + one `slides` row per outline item (`html_content=null`). `Outline.vue` auto-starts this on mount when no slides exist yet.
-2. **Outline chat** (`Outline.vue` → `sendOutlineChat()`, phase `outline-chat`) — natural-language outline edits. **Not** jsonMode; the system prompt constrains the model to return the same JSON structure. `parseOutline` runs on the streamed content and **only writes to DB on parse success** (a failed parse leaves the existing outline untouched).
-3. **Per-slide HTML** (`Editor.vue` → `startSlide()` / `startAll()`, phase `slide`) — builds `slideHtmlPrompt`: inlines the shared `theme_css` verbatim into a standalone HTML doc whose `.slide` canvas is fixed at **1920×1080**. Not JSON mode. `cleanHtml` strips code fences. During the stream, `slide.html_content` is updated live from `cleanHtml(genState.content)` so the preview follows token-by-token; on completion it is persisted (`upsertSlide`). `startAll` loops per slide, skipping already-generated ones and advancing `genState.slideIdx` (the editor auto-follows).
-4. **Per-slide chat editing** (`Editor.vue` → `sendChat()`, phase `chat`) — sends the current page's HTML + a modification instruction; the model returns a full revised HTML doc, streamed live into the preview. Messages are scoped to the slide via `messages.slide_id`.
-5. **Export** — `exportPptx` (`src/lib/ppt.ts`) renders each slide's HTML in an **isolated hidden `<iframe>`** at 1920×1080 (not a plain div — the iframe isolates the slide's `<style>`, which can contain `:root`/`body/*` global rules that would otherwise pollute the app document during the screenshot), screenshots it with `modern-screenshot` (`domToPng` → PNG dataURL), assembles a `.pptx` via `pptxgenjs` (one full-bleed image per slide, `LAYOUT_WIDE`), then writes bytes through the Rust `save_file` command after a native save dialog.
+1. **Outline + design system** (`Outline.vue` → `startOutline()`, phase `outline`) — `chatOnce(..., jsonMode=true)` → Rust `chat_stream`. OpenAI format sends `response_format: json_object`; Anthropic ignores `json_mode` and relies on the prompt. Returns `{design_tokens, theme_css, slides[], style?}`. `parseOutline` tolerantly extracts the JSON (fence-stripping + brace-balancing) and **retries once** on parse failure. Stored on `projects` (design_tokens/theme_css/style) + one `slides` row per outline item (`html_content=null`). `Outline.vue` auto-starts this on mount when no slides exist yet. On success, the thinking is persisted (`addMessage(..., genState.reasoning)`).
+2. **Outline chat** (`Outline.vue` → `sendOutlineChat()`, phase `outline-chat`) — natural-language outline edits. **Not** jsonMode; the system prompt constrains the model to return the same JSON structure. `parseOutline` runs on the streamed content and **only writes to DB on parse success** (a failed parse leaves the existing outline untouched). Persists reasoning on success.
+3. **Per-slide HTML** (`Editor.vue` → `startSlide()` / `startAll()`, phase `slide`) — builds `slideHtmlPrompt`: inlines the shared `theme_css` verbatim into a standalone HTML doc whose `.slide` canvas is fixed at **1920×1080**. Not JSON mode. `cleanHtml` strips code fences. During the stream, `slide.html_content` is updated live from `cleanHtml(genState.content)` so the preview follows token-by-token; on completion it is persisted (`upsertSlide`) and a completion message with reasoning is added. Then **`maybeSelfCheck`** may run (see Self-check). `startAll` loops per slide, skipping already-generated ones and advancing `genState.slideIdx`; the editor auto-follows via a `watch(genState.slideIdx)` gated on `genState.projectId === projectId` (not on `running`), so it tracks page advances across the `running=false` gap between pages.
+4. **Per-slide chat editing** (`Editor.vue` → `sendChat()`, phase `chat`) — sends the current page's HTML + a modification instruction; the model returns a full revised HTML doc, streamed live into the preview. Messages are scoped to the slide via `messages.slide_id`. **Debug mode**: when the user picks an element, `sendChat` receives an `element {html, selector}` and switches the prompt to `chatWithElementPrompt` (edit scoped to that element; full-page HTML still returned). Persists reasoning on success.
+5. **Export** — `exportPptx` (`src/lib/ppt.ts`) renders each slide's HTML in an **isolated hidden `<iframe>`** at 1920×1080 via `renderSlideToDataUrl` (not a plain div — the iframe isolates the slide's `<style>`, which can contain `:root`/`body/*` global rules that would otherwise pollute the app document during the screenshot), screenshots it with `modern-screenshot` (`domToPng` → PNG dataURL), assembles a `.pptx` via `pptxgenjs` (one full-bleed image per slide, `LAYOUT_WIDE`), then writes bytes through the Rust `save_file` command after a native save dialog. `renderSlideToDataUrl` is shared by export and the self-check screenshot.
 
 ### Style system
 
@@ -52,34 +52,66 @@ ProjectList lets the user pick a style (or "自动/AI 选") at creation time.
 
 ### The slide-canvas convention (cross-cutting)
 
-`SLIDE_W=1920` / `SLIDE_H=1080` in `src/lib/prompt.ts` is the single source of truth shared by prompt construction, preview scaling (`SlidePreview.vue` renders HTML in an `<iframe srcdoc>` at fixed 1920×1080, CSS-transform-scaled to fit via `ResizeObserver`), and export screenshotting. Changing the canvas size means touching all three.
+`SLIDE_W=1920` / `SLIDE_H=1080` in `src/lib/prompt.ts` is the single source of truth shared by prompt construction, preview scaling (`SlidePreview.vue` renders HTML in an `<iframe srcdoc>` at fixed 1920×1080, CSS-transform-scaled to fit via `ResizeObserver`), and export screenshotting. Changing the canvas size means touching all three. `SlidePreview` also throttles `srcdoc` reloads (~150ms leading+trailing into a `displayHtml` ref) and paints the detected `.slide`/`body` solid background onto the iframe element during reload gaps, so streaming a dark slide doesn't flash white/black each token.
+
+### Multi-AI configuration & formats
+
+This **replaces** the old single key-value API config. `src/lib/aiConfig.ts` is the source of truth; `src/lib/settings.ts` is now a thin re-export shim kept only so historical imports don't break — new code should import from `aiConfig.ts`.
+
+- **`ai_configs` table** (migration 004): one row per AI — `name / api_base / api_key / model / format("openai"|"anthropic") / multimodal / thinking_mode / thinking_effort / enabled / models_cache`. `enabled` is single-select: `setActiveAi(id)` flips all rows to 0 then the target to 1. `getActiveAi()` returns the one enabled row.
+- **Active config is read at call time**, never cached: `chat()`/`chatOnce()` call `getActiveAi()` per request, so switching the active AI takes effect on the next message. Throws "请先在「设置」页配置并启用一个 AI" if none is active or incomplete.
+- **Model list is cached per-config** in `ai_configs.models_cache` (JSON array) via `getModelsCache(id)`/`saveModelsCache(id, ids)` — the Settings dropdown repopulates for the selected config, and is cleared when `api_base` or `format` changes.
+- **Legacy import** (`ensureLegacyImport`, run once in `main.ts` `bootstrap()`): if `ai_configs` is empty and the old `settings` table has a non-empty `api_base`, creates one `openai`/`enabled` config from the legacy key-value values. Idempotent — won't re-fire once any config exists.
+- **App-level toggles still use the `settings` key-value table** via `getSetting`/`setSetting` (re-exported from `aiConfig.ts`). Currently only `auto_selfcheck` (`"true"`/`"false"`; null/other treated as on).
+- **Format dispatch** (Rust `lib.rs`, driven by `config.format`):
+  - `openai` (default) — POST `{api_base}/chat/completions`, `Authorization: Bearer`, OpenAI SSE (`data:` lines; `delta.content`→chunk, `delta.reasoning_content`→reasoning). `json_mode` → `response_format:{type:"json_object"}`.
+  - `anthropic` — POST `{api_base}/v1/messages`, `x-api-key` + `anthropic-version: 2023-06-01`, system messages lifted to a top-level `system` string, Anthropic SSE (`event:`/`data:` pairs; `content_block_delta`→`text_delta`→chunk / `thinking_delta`→reasoning; `message_stop`→done). **No** `response_format` — `json_mode` is ignored and the prompt must constrain JSON output itself.
+  - `list_models` mirrors this: OpenAI `GET {api_base}/models` (Bearer) vs Anthropic `GET {api_base}/v1/models` (x-api-key); both read `data[].id`.
+- **Multimodal images**: `ChatMessage.images: Vec<String>` (dataURLs). OpenAI packs them as `image_url` parts; Anthropic as `image` base64 `source` blocks. Today only the self-check path sends an image (the page screenshot).
+
+### Self-check
+
+Phase `selfcheck`. `maybeSelfCheck(projectId, slides, idx)` runs after a successful `startSlide` **iff** the active AI is `multimodal` **and** the `auto_selfcheck` setting ≠ `"false"` (default on). `selfCheckSlide` screenshots the just-generated page via `renderSlideToDataUrl` → sends `selfCheckPrompt(html)` + the screenshot image → streams a revised HTML → **validates before writing**:
+- structure: must be a complete `<html>` doc containing `.slide`;
+- **theme fingerprint**: `themeFingerprint(html)` (every `background`/`background-color`/`color` declaration, whitespace-stripped, sorted, deduped) must equal the original's. A rewrite that altered the palette is **discarded and the original restored** — self-check must never touch the design system.
+
+On success → persist + assistant message with reasoning. On structural/theme failure, cancel, or error → restore the original HTML and add a "已保留原页" message (no reasoning attached). Like every phase, cancel/error never writes half data.
+
+### Debug / inspect mode
+
+The Editor's "调试模式" toggle flips `SlidePreview`'s `inspectMode` prop. With it on, a capture-phase click listener on the iframe document (re-attached on iframe `@load`, because `srcdoc` loads async) highlights the clicked element and emits `pick {html: outerHTML, selector: cssSelectorPath}`. `Editor.onPick` wraps it as a `【选中元素】` fenced block and `ChatPanel.prepend`s it into the input; on send, `sendChat` parses that block back into an `element` arg, selecting `chatWithElementPrompt`.
 
 ### Streaming protocol (Rust ↔ frontend)
 
-Frontend `chat()` (`src/lib/chat.ts`) calls `invoke("chat_stream", {config, messages})` and subscribes to Tauri events emitted by `lib.rs`, which parses SSE line-by-line (`bytes_stream` + manual `buf` accumulation):
+Frontend `chat()` (`src/lib/chat.ts`) calls `invoke("chat_stream", {config, messages})` and subscribes to Tauri events. `lib.rs` normalizes **both** OpenAI and Anthropic SSE into the same event set (parsed line-by-line, `bytes_stream` + manual `buf` accumulation):
 
-| event | payload | source field |
+| event | payload | source |
 |---|---|---|
 | `chat-start` | `()` | connection 200 |
-| `chat-chunk` | `String` | `delta.content` |
-| `chat-reasoning` | `String` | `delta.reasoning_content` |
-| `chat-done` | `()` | stream end / `[DONE]` |
+| `chat-chunk` | `String` | OpenAI `delta.content` · Anthropic `text_delta` |
+| `chat-reasoning` | `String` | OpenAI `delta.reasoning_content` (DeepSeek) · Anthropic `thinking_delta` |
+| `chat-done` | `()` | stream end / OpenAI `[DONE]` / Anthropic `message_stop` |
 
-`invoke` resolves when the stream finishes. The reasoning field is `reasoning_content` (DeepSeek convention), not OpenAI's `reasoning`.
+`invoke` resolves when the stream finishes. **Cancellation**: `cancel_chat` aborts the `Abortable`-wrapped stream (a single `AbortSlot` held in managed state), emits `chat-done`, and returns `Err("__cancelled__")`; `chat.ts` rethrows that as a `CancelledError` (`.__cancelled=true`) so `genStore` can tell cancel apart from a real error and check `genState.cancelled` between phases.
 
-`list_models` is a separate, **non-streaming** `invoke` that GETs `{api_base}/models` and returns `string[]` of model ids; the Settings page caches the result in the `settings` table (key `models`) via `getModelsCache`/`saveModelsCache` so the dropdown repopulates on reopen.
+`list_models` is a separate, **non-streaming** format-aware `invoke`; the Settings page caches its result per-config in `ai_configs.models_cache`.
 
 ### Thinking mode
 
-When `thinking_mode` is on (Settings page), `lib.rs` injects `thinking: {type:"enabled"}` and `reasoning_effort` (`"high"`/`"max"`) into the request body. `chat-reasoning` events carry the thinking deltas; during reasoning there are no `chat-chunk` events. The `ChatPanel` shows a live "思考中" card fed by `genState.reasoning`.
+`thinking_mode`/`thinking_effort` are **per-AI-config**, not global. When on, `lib.rs` injects:
+- OpenAI: `thinking:{type:"enabled"}` + `reasoning_effort` (`"high"`/`"max"`).
+- Anthropic: `thinking:{type:"enabled", budget_tokens}` (16000 for high, 32000 for max) and raises `max_tokens` to `budget + 8192`.
+
+`chat-reasoning` events carry the thinking deltas; during reasoning there are no `chat-chunk` events. The UI shows a live "思考中" card fed by `genState.reasoning`. **Persistence** (migration 005): on each successful completion `genStore` passes `genState.reasoning` to `addMessage(...)` → `messages.reasoning`; `ChatPanel` renders it under the assistant message as a collapsible `<details>` (default collapsed, expand to review). Cancel/error/failed-self-check paths don't persist reasoning — consistent with "no half data on failure".
 
 ## Conventions & gotchas
 
-- **API URL construction:** Rust builds `{api_base}/chat/completions` and `{api_base}/models` after trimming a trailing `/`. So `api_base` is the provider base, e.g. `https://api.deepseek.com` or `https://api.openai.com/v1` — *not* including `/chat/completions`. The Settings page appends `/chat/completions` only in its help text, the actual code doesn't.
-- **JSON mode is for outline generation only.** `startOutline` uses it; `sendOutlineChat`, `startSlide`, and `sendChat` must not.
-- **Settings are key-value** in the `settings` table (`api_base`, `api_key`, `model`, `thinking_mode` as `"true"`/`"false"` string, `thinking_effort`, plus the cached `models` JSON array). `src/lib/settings.ts` marshals to/from the `ApiSettings` shape.
-- **Buttons/status read from `genState`, not local refs.** `Editor.vue`/`Outline.vue` gate buttons on `genState.running` and surface progress via `genState.status`; flows are sequential and gated by `running`. Live preview during a run comes from `cleanHtml(genState.content)`, *not* from the DB row (the DB is only read on run completion).
+- **API URL construction:** Rust trims a trailing `/` then appends per format — OpenAI: `{api_base}/chat/completions` + `{api_base}/models`; Anthropic: `{api_base}/v1/messages` + `{api_base}/v1/models`. So `api_base` is the provider base (e.g. `https://api.deepseek.com`, `https://api.openai.com/v1`, `https://api.anthropic.com`) — never including the path. Settings help text mentions the suffix; the code doesn't take it from the user.
+- **JSON mode is for outline generation only** (`startOutline`). `sendOutlineChat`/`startSlide`/`sendChat` must not. Note: `response_format:json_object` is OpenAI-only — Anthropic silently ignores `json_mode` and relies on the prompt.
+- **AI config lives in `ai_configs`, not `settings`.** `src/lib/aiConfig.ts` is the source of truth (CRUD + `getActiveAi`/`setActiveAi` single-select + per-config `models_cache` + `ensureLegacyImport`). `src/lib/settings.ts` is a thin re-export shim — don't add new API-config code there. The `settings` table now only holds app-level key-value toggles (`auto_selfcheck`).
+- **Buttons/status read from `genState`, not local refs.** `Editor.vue`/`Outline.vue` gate buttons on `genState.running` and surface progress via `genState.status`; flows are sequential and gated by `running`. **Global lock**: `genState` is a singleton, so a generation in project A blocks project B — `ChatPanel` takes a `locked` prop (Editor/Outline pass `genState.running`) that disables send while any generation runs, and `ProjectList` disables new-project buttons with a "生成中" hint. Viewing/switching existing projects stays allowed (to watch live progress). **Cancel**: `cancelGeneration()` sets `genState.cancelled` + invokes `cancel_chat`; each phase checks `cancelled` between steps and self-check restores the original HTML on cancel. Live preview during a run comes from `cleanHtml(genState.content)`, *not* the DB row (DB read only on completion); `Editor.currentHtml` falls back to `cur.html_content` when `genState.content` is still empty, so starting a chat edit doesn't blank the preview before the first chunk.
+- **Self-check must not alter the theme.** `themeFingerprint` guards this — if a multimodal rewrite changes any background/color, it's discarded and the original restored.
 - **TLS:** `reqwest` is built with `rustls-tls` (no native OpenSSL on Windows) + `stream` feature for SSE — don't switch to default features.
 - **CSP** is `null` in `tauri.conf.json`; slides rely on fully inlined CSS (no external resources) so this is intentional.
-- **Capabilities** (`src-tauri/capabilities/default.json`) scope the `main` window to `core:default`, `opener:default`, `sql:default` + `sql:allow-execute/select/close`, and `dialog:default`. Adding a new Tauri command that needs fs/network perms means updating permissions here.
+- **Capabilities** (`src-tauri/capabilities/default.json`) scope the `main` window to `core:default`, `opener:default`, `sql:default` + `sql:allow-execute/select/close`, and `dialog:default`. `cancel_chat` needs no extra perms (plain command); `save_file` writes via `std::fs::write` directly, bypassing the fs plugin. Adding a command that needs fs/network perms means updating permissions here.
 - **`Cargo.lock` is intentionally tracked** (binary crate, not a library) — do not gitignore it. Rust build output (`target/`, `gen/schemas`) is ignored via `src-tauri/.gitignore`.

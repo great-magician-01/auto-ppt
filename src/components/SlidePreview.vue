@@ -80,9 +80,63 @@ function onClick(e: MouseEvent) {
   });
 }
 
-async function reloadIframe() {
-  await nextTick();
-  attachInspector();
+// ---- 防闪烁：节流 srcdoc 重载 + 匹配底色 ----
+// 流式生成时 html 每 token 变化，直接绑 srcdoc 会让 iframe 每 token 全量重载 → 白底反复闪。
+// 节流到约 150ms 一次（leading+trailing：离散变化立即生效，流式则平滑）；并把探测到的
+// 幻灯片实色背景设到 iframe 元素自身，重载间隙显示该色而非白色，黑底不再刺眼。
+const displayHtml = ref(props.html);
+const iframeBg = ref(detectBg(props.html));
+let lastFlush = 0;
+let throttleTimer: number | null = null;
+let pendingHtml = props.html;
+
+function flushNow() {
+  displayHtml.value = pendingHtml;
+  iframeBg.value = detectBg(pendingHtml);
+  lastFlush = Date.now();
+}
+
+watch(
+  () => props.html,
+  (h) => {
+    pendingHtml = h;
+    if (throttleTimer != null) return; // 已有 trailing 计划，到时刷最新值即可
+    const elapsed = Date.now() - lastFlush;
+    if (elapsed >= 150) {
+      flushNow(); // 离散变化（如手动切页）立即生效，不卡顿
+    } else {
+      throttleTimer = window.setTimeout(() => {
+        throttleTimer = null;
+        flushNow();
+      }, 150 - elapsed);
+    }
+  }
+);
+
+/** 从 <style> 里取 .slide / body 的实色背景（支持 var() 解析 :root），作为重载间隙底色。 */
+function detectBg(html: string): string {
+  const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+  const css = styleMatch?.[1] ?? "";
+  const vars = new Map<string, string>();
+  const rootMatch = css.match(/:root\s*\{([^}]*)\}/);
+  if (rootMatch) {
+    for (const d of rootMatch[1].matchAll(/(--[\w-]+)\s*:\s*([^;}]+)/g)) {
+      vars.set(d[1].trim(), d[2].trim());
+    }
+  }
+  const raw =
+    (
+      css.match(/\.slide\s*\{[^}]*background(?:-color)?\s*:\s*([^;}]+)/i) ||
+      css.match(/\bbody\s*\{[^}]*background(?:-color)?\s*:\s*([^;}]+)/i)
+    )?.[1]?.trim() ?? "";
+  if (!raw) return "#fff";
+  let resolved = raw;
+  const varRef = raw.match(/var\(\s*(--[\w-]+)\s*\)/);
+  if (varRef) resolved = vars.get(varRef[1]) ?? "";
+  if (!resolved) return "#fff";
+  // 仅接受实色（hex / rgb / 命名色），gradient 等回落白
+  if (/^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|[a-z]+)$/i.test(resolved)) return resolved;
+  return "#fff";
 }
 
 onMounted(() => {
@@ -91,14 +145,15 @@ onMounted(() => {
     ro = new ResizeObserver(update);
     ro.observe(wrap.value);
   }
-  reloadIframe();
+  // 兜底：srcdoc 首次载入若 @load 已挂则幂等无副作用
+  nextTick(attachInspector);
 });
 onBeforeUnmount(() => {
   ro?.disconnect();
+  if (throttleTimer != null) window.clearTimeout(throttleTimer);
   const doc = iframeEl.value?.contentDocument;
   doc?.removeEventListener("click", onClick as EventListener, true);
 });
-watch(() => props.html, reloadIframe);
 watch(() => props.inspectMode, () => {
   if (!props.inspectMode) clearHighlight();
 });
@@ -114,7 +169,13 @@ watch(() => props.inspectMode, () => {
         transform: `scale(${scale})`,
       }"
     >
-      <iframe v-if="html" ref="iframeEl" :srcdoc="html" />
+      <iframe
+        v-if="displayHtml"
+        ref="iframeEl"
+        :srcdoc="displayHtml"
+        :style="{ background: iframeBg }"
+        @load="attachInspector"
+      />
       <div v-else class="empty">尚未生成 HTML</div>
       <div v-if="inspectMode" class="inspect-hint">调试模式：点击元素送入对话栏</div>
     </div>

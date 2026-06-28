@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, watch, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import ChatPanel from "../components/ChatPanel.vue";
 import { genState, startOutline, sendOutlineChat, cancelGeneration } from "../lib/genStore";
@@ -20,6 +20,14 @@ const projectId = Number(props.id);
 const project = ref<Project | null>(null);
 const slides = ref<Slide[]>([]);
 const messages = ref<Message[]>([]);
+// 大纲流式思考 <pre>：长思考自动滚到底
+const reasoningEl = ref<HTMLElement | null>(null);
+
+async function scrollReasoningBottom() {
+  await nextTick();
+  if (reasoningEl.value) reasoningEl.value.scrollTop = reasoningEl.value.scrollHeight;
+}
+watch(() => genState.reasoning, scrollReasoningBottom);
 
 const isRunning = computed(
   () => genState.running && genState.projectId === projectId
@@ -109,7 +117,7 @@ function goEditor() {
         <div v-if="isRunning && !outlineView.length" class="stream">
           <div v-if="genState.reasoning" class="block">
             <span class="label">思考</span>
-            <pre>{{ genState.reasoning }}</pre>
+            <pre ref="reasoningEl">{{ genState.reasoning }}</pre>
           </div>
           <div class="block">
             <span class="label">正文（JSON 流式）</span>
@@ -134,6 +142,7 @@ function goEditor() {
         :messages="messages"
         :running="isRunning"
         :reasoning="isRunning ? genState.reasoning : ''"
+        :locked="genState.running"
         :disabled="!slides.length && !isRunning"
         placeholder="修改大纲，如：把第3页拆成两页 / 加一页讲应用场景…"
         @send="onSend"
