@@ -1,22 +1,29 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getSettings } from "./settings";
+import { getActiveAi } from "./aiConfig";
 import type { ChatRole } from "./db";
 
 export interface ChatMsg {
   role: ChatRole;
   content: string;
+  /** dataURL 数组（多模态自检时附截图），OpenAI→image_url，Anthropic→image base64 */
+  images?: string[];
+}
+
+/** 取消哨兵错误：取消时抛此，调用方识别 .__cancelled=true 不当硬错误。 */
+export interface CancelledError extends Error {
+  __cancelled: true;
 }
 
 /**
- * 流式对话。Rust 侧把 OpenAI 兼容接口的 SSE 增量通过事件推回：
+ * 流式对话。Rust 侧按 config.format 分发 OpenAI 兼容接口或 Anthropic 原生接口的 SSE 增量：
  *  - chat-start    : 连接已建立
  *  - chat-chunk    : 正式回答增量文本
  *  - chat-reasoning : 思考模式下的思考过程增量（思考阶段只有它，没有 chunk）
  *  - chat-done     : 流结束
  *
- * @param jsonMode 为 true 时强制 JSON 输出（response_format=json_object），
- *                 仅用于大纲等需要 JSON 的场景；HTML 生成不可开。
+ * @param jsonMode 为 true 时强制 JSON 输出（OpenAI 的 response_format=json_object），
+ *                 仅用于大纲等需要 JSON 的场景；Anthropic 忽略此项靠提示词约束。HTML 生成不可开。
  */
 export async function chat(
   messages: ChatMsg[],
@@ -24,11 +31,19 @@ export async function chat(
   onReasoning?: (delta: string) => void,
   jsonMode = false
 ): Promise<void> {
-  const settings = await getSettings();
-  if (!settings.api_base || !settings.api_key || !settings.model) {
-    throw new Error("请先在「设置」页配置 API 地址、密钥和模型");
+  const ai = await getActiveAi();
+  if (!ai || !ai.api_base || !ai.api_key || !ai.model) {
+    throw new Error("请先在「设置」页配置并启用一个 AI");
   }
-  const config = { ...settings, json_mode: jsonMode };
+  const config = {
+    api_base: ai.api_base,
+    api_key: ai.api_key,
+    model: ai.model,
+    format: ai.format,
+    thinking_mode: ai.thinking_mode,
+    thinking_effort: ai.thinking_effort,
+    json_mode: jsonMode,
+  };
 
   const onChunkUn = await listen<string>("chat-chunk", (e) => onChunk(e.payload));
   const onReasoningUn = onReasoning
@@ -40,7 +55,13 @@ export async function chat(
   try {
     // invoke 返回即代表流结束
     await invoke("chat_stream", { config, messages });
-  } catch (e) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "__cancelled__") {
+      const err = new Error("已取消") as CancelledError;
+      err.__cancelled = true;
+      throw err;
+    }
     console.error("[chat] 调用失败：", e);
     throw e;
   } finally {

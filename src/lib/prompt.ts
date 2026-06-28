@@ -31,7 +31,12 @@ export function outlinePrompt(
 
 【输出要求】
 1. design_tokens：专业协调的配色与字体方案，字段为 primary / accent / background / surface / text / textMuted / fonts / titleSize / bodySize（颜色用 #hex；titleSize 72–96px、bodySize 32–44px，必须保证投影可读，禁止偏小）。字体用系统通用字体族（如 "Microsoft YaHei"/"PingFang SC"/sans-serif 或 monospace），不要依赖需联网加载的字体。
-2. theme_css：基于上述 tokens 的完整 CSS，包含 :root 中的 CSS 变量，以及通用类 .slide、.slide-title、.slide-body、.accent-bar 等。.slide 固定为 ${SLIDE_W}px × ${SLIDE_H}px（16:9），overflow:hidden，box-sizing:border-box。所有页面共享它。
+2. theme_css：基于上述 tokens 的完整 CSS，包含 :root 中的 CSS 变量，以及通用类 .slide、.slide-title、.slide-body、.accent-bar 等。所有页面共享它。theme_css 必须遵守以下弹性铁律以防止内容溢出：
+   - .slide 固定为 ${SLIDE_W}px × ${SLIDE_H}px（16:9），overflow:hidden，box-sizing:border-box，且必须 display:flex; flex-direction:column;
+   - 必须包含 body,html { margin:0; padding:0; } 重置，消除默认 8px 边距导致的整体下移
+   - :root 中的字号变量必须使用 clamp() 实现弹性，如 --titleSize: clamp(56px, 5vw, 96px); --bodySize: clamp(24px, 2vw, 40px); 确保内容多时自动缩小，但正文最小不低于 20px
+   - 所有直接子内容容器（如 .content、.grid、.columns、.cards）必须允许弹性收缩：使用 min-height:0; flex-shrink:1; overflow:visible（不要加 overflow:hidden，否则截图时隐藏内容会丢失）
+   - 文本容器必须设置合理的 max-height（如 calc(100% - 标题高度)）配合 overflow:visible，确保所有文本在截图时完整可见
 3. slides：数组，第一页 kind=cover（封面），最后一页 kind=ending（致谢），中间用 cover/bullets/two-column/quote/section 等版式。每页含 title（标题）、kind（版式）、bullets（要点字符串数组）。中间内容页 bullets 至少 4 条，每条应是一个有信息量的完整要点（可含简短支撑说明、数据或案例），内容充实专业、紧扣主题展开；封面/致谢可短。${styleReturnClause}
 
 内容要专业、充实、紧扣主题，避免空洞。
@@ -76,8 +81,15 @@ ${themeCss}
 5. 视觉要精致：用版式结构（分区、分栏、网格、序号编号、徽标、accent 装饰条、几何点缀、留白比例）营造层次与质感，避免纯文本堆砌的朴素列表感。版式（cover/bullets/two-column/quote/section 等）通过布局结构来区分。
 6. 【风格一致性铁律】所有页面的背景、配色、字体必须与设计系统完全一致。禁止为任何版式整页更换背景（不得出现 .slide.section/.slide.cover 之类覆盖 background 的规则），禁止改写 :root 变量，禁止为单页换色或换字体。不同页面之间只能有布局结构的差异，视觉基调必须统一如同一套模板。
 7. 内容绝不溢出 ${SLIDE_W}×${SLIDE_H} 画布：通过合理分栏、分区与字号控制来容纳丰富内容，宁可多分一栏/分区也不要缩小到看不清；严禁溢出边界。
-8. 全部样式内联在 <style> 中，不引用任何外部图片/字体/资源（不得使用 @import 或 Google Fonts 链接，字体用系统字体或 theme.css 已定义的字体族）。
-9. 只输出 HTML 本身，不要 markdown 代码块、不要任何解释。`;
+8. 【弹性排版铁律——防止溢出的核心手段】
+   - 字号优先使用 clamp()：页面标题 'font-size: clamp(48px, 4.5vw, 96px)'，正文 'font-size: clamp(20px, 1.8vw, 40px)'，辅助说明 'font-size: clamp(18px, 1.5vw, 28px)'；内容极多时可进一步压低 clamp 上限，但正文绝不低于 20px
+   - 卡片/分区容器必须 'min-height: 0; flex-shrink: 1; overflow: visible'（不要加 overflow:hidden，否则导出截图时隐藏内容会丢失），允许内容区弹性压缩而非撑破画布
+   - Grid 布局的行列尺寸使用 'minmax(0, 1fr)' 而非裸 '1fr'，否则文本会撑出网格轨道
+   - 当要点超过 4 条或单条文字较长时，主动增加分栏数（如 3 栏或 4 栏）、减小 gap（最小 16px）与 padding（最小 48px），用空间换密度
+   - 控制行高防止垂直溢出：正文 line-height 不超过 1.4，标题 line-height 不超过 1.2
+   - 本页追加的样式中必须包含 'body { margin: 0; padding: 0; }'
+9. 全部样式内联在 <style> 中，不引用任何外部图片/字体/资源（不得使用 @import 或 Google Fonts 链接，字体用系统字体或 theme.css 已定义的字体族）。
+10. 只输出 HTML 本身，不要 markdown 代码块、不要任何解释。`;
 }
 
 /**
@@ -133,4 +145,49 @@ export function cleanHtml(raw: string): string {
   // 流式过程中代码块尚未闭合：去掉开头的 ```html
   return s.replace(/^```(?:html)?\s*/i, "");
 }
+
+/** 多模态自检：对照截图与当前 HTML，仅修正溢出/排版/对齐问题，严禁改动主题样式。 */
+export function selfCheckPrompt(html: string): string {
+  return `你是 PPT 视觉自检员。对照附图（当前页面渲染截图）与下方当前 HTML，检查是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”。若有，仅做最小幅度修正；若无，原样返回该 HTML。
+
+当前 HTML：
+${html}
+
+【铁律：主题样式必须原样保留】
+1. <style> 中 :root 变量、body/html 背景、.slide 的 background、所有配色与字体必须逐字保留，禁止任何改动（黑色背景就是黑色背景，禁止改成白色或其他颜色）。
+2. 只允许调整布局类属性：margin/padding/width/height/grid/flex/行高/定位，以消除溢出与错位。
+3. 画布 .slide 固定 ${SLIDE_W}×${SLIDE_H}，overflow:hidden，box-sizing:border-box，内边距不少于 48px。
+4. 修复溢出的首选手段（按优先级）：
+   a) 把固定字号改为 clamp() 或缩小 clamp 上限（正文不低于 20px）
+   b) 给文本容器加 'min-height: 0; flex-shrink: 1; overflow: visible'（不要加 overflow:hidden，否则导出截图时隐藏内容会丢失）
+   c) Grid 行列改用 'minmax(0, 1fr)'
+   d) 减小 gap/padding（padding 最低 48px，gap 最低 12px）
+   e) 控制行高：正文 line-height 不超过 1.4，标题 line-height 不超过 1.2
+   f) 极端情况下可对过长文本使用 '-webkit-line-clamp' 或多行截断，但优先保留完整信息
+5. 不得新增或删除任何 class、不得改写标签结构，只修样式值。
+
+【输出】只输出完整 HTML 文档（<!DOCTYPE html>…</html>），不要 markdown 代码块、不要解释。若页面无明显硬伤，必须原样返回上面那段 HTML（一字不改）。`;
+}
+
+
+/** 调试模式选中元素修改：用户选中了一个元素，仅改该部分，返回整页 HTML。 */
+export function chatWithElementPrompt(args: {
+  html: string;
+  elementHtml: string;
+  selector: string;
+  instruction: string;
+}): string {
+  return `这是当前页 HTML：
+${args.html}
+
+用户用调试模式选中了页面中一个元素，仅改动该元素对应的部分，其余结构保持不变。返回修改后的完整 HTML 文档（<!DOCTYPE html>…</html>），不要 markdown 代码块、不要解释。
+
+选中元素 HTML：
+${args.elementHtml}
+
+定位（CSS 选择器路径）：${args.selector}
+
+用户修改指令：${args.instruction}`;
+}
+
 

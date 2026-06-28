@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+:root{--primary:#00d8ff;--accent:#b44dff;--background:#0a0a1a;--surface:#1a1a2e;--text:#ffffff;--text-muted:#8888aa;--fonts:'PingFang SC','Microsoft YaHei','Helvetica Neue',sans-serif;--title-size:80px;--body-size:36px;}*{box-sizing:border-box;margin:0;padding:0;}.slide{width:1920px;height:1080px;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:60px;background:var(--background);color:var(--text);font-family:var(--fonts);position:relative;}.slide-title{font-size:var(--title-size);font-weight:bold;color:var(--primary);margin-bottom:40px;text-align:center;}.slide-body{font-size:var(--body-size);line-height:1.5;max-width:1500px;}.accent-bar{width:80px;height:6px;background:var(--accent);margin:20px auto;}.cover .slide-title{font-size:96px;color:var(--primary);text-shadow:0 0 30px rgba(0,216,255,0.5);}.cover .slide-body{color:var(--text-muted);}.ending .slide-title{color:var(--accent);font-size:90px;}.ending .slide-body{color:var(--text-muted);}.bullets .slide-body{display:flex;flex-direction:column;align-items:flex-start;gap:20px;}.bullets .slide-body>*{display:flex;align-items:flex-start;gap:15px;font-size:var(--body-size);}.bullets .slide-body>*::before{content:"◆";color:var(--primary);font-size:24px;margin-top:8px;}.two-column .slide-body{display:grid;grid-template-columns:1fr 1fr;gap:60px;width:100%;}
+/* 本页专属样式 */
+.ending .slide-title {
+    font-size: 96px;
+    margin-bottom: 20px;
+    text-shadow: 0 0 40px rgba(0,216,255,0.3);
+}
+.ending .accent-bar {
+    margin: 10px auto 40px;
+}
+.ending .slide-body {
+    display: flex;
+    flex-direction: row;
+    gap: 60px;
+    justify-content: center;
+    align-items: stretch;
+    width: 100%;
+    max-width: 1600px;
+    color: var(--text);
+}
+.point-item {
+    flex: 1;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px;
+    padding: 48px 40px;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 28px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    transition: transform 0.3s ease, border-color 0.3s ease;
+}
+.point-item:hover {
+    transform: translateY(-4px);
+    border-color: var(--primary);
+}
+.point-icon {
+    font-size: 60px;
+    font-weight: bold;
+    line-height: 1;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.point-content h3 {
+    font-size: 44px;
+    font-weight: bold;
+    color: var(--primary);
+    margin-bottom: 16px;
+    line-height: 1.3;
+}
+.point-content p {
+    font-size: 28px;
+    line-height: 1.7;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+.point-content p:last-child {
+    margin-bottom: 0;
+}
+.footer {
+    margin-top: auto;
+    padding: 32px 0 0;
+    font-size: 24px;
+    color: var(--text-muted);
+    text-align: center;
+    width: 100%;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    letter-spacing: 2px;
+}
+.bg-decoration {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+}
+.bg-decoration .circle1,
+.bg-decoration .circle2,
+.bg-decoration .circle3 {
+    position: absolute;
+    border-radius: 50%;
+    opacity: 0.1;
+}
+.bg-decoration .circle1 {
+    width: 700px;
+    height: 700px;
+    background: linear-gradient(45deg, var(--accent), transparent);
+    top: -200px;
+    right: -150px;
+}
+.bg-decoration .circle2 {
+    width: 500px;
+    height: 500px;
+    background: linear-gradient(135deg, var(--primary), transparent);
+    bottom: -150px;
+    left: -100px;
+}
+.bg-decoration .circle3 {
+    width: 300px;
+    height: 300px;
+    border: 2px solid var(--primary);
+    opacity: 0.05;
+    top: 50%;
+    left: 70%;
+    transform: translate(-50%, -50%);
+}
+</style>
+</head>
+<body>
+<div class="slide ending">
+    <div class="bg-decoration">
+        <div class="circle1"></div>
+        <div class="circle2"></div>
+        <div class="circle3"></div>
+    </div>
+    <div class="slide-title">感谢聆听</div>
+    <div class="accent-bar"></div>
+    <div class="slide-body">
+        <div class="point-item">
+            <div class="point-icon">✦</div>
+            <div class="point-content">
+                <h3>欢迎关注后续技术分享</h3>
+                <p>我们将持续发布大模型训练、分布式推理、模型压缩等系列技术文章与实战案例，帮助开发者深入掌握大模型核心技术。</p>
+                <p>定期举办在线研讨会与直播，邀请业界专家解析最新研究进展与行业应用，订阅可及时获取活动预告及独家资料。</p>
+            </div>
+        </div>
+        <div class="point-item">
+            <div class="point-icon">✦</div>
+            <div class="point-content">
+                <h3>更多内容请访问官网</h3>
+                <p>官网提供完整的模型文档、API参考、开源代码及社区论坛，助力开发者快速上手与深入应用。</p>
+                <p>访问 example.com/ai 获取最新资源，或关注我们的 GitHub 项目获取源码与示例，加入开发者社区交流。</p>
+            </div>
+        </div>
+    </div>
+    <div class="footer">✨ 期待与您再次相遇 · 持续探索 AI 的无限可能 ✨</div>
+</div>
+</body>
+</html>

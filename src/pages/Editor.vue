@@ -11,7 +11,7 @@ import {
   type Slide,
   type Message,
 } from "../lib/db";
-import { genState, startSlide, startAll, sendChat } from "../lib/genStore";
+import { genState, startSlide, startAll, sendChat, cancelGeneration } from "../lib/genStore";
 import { cleanHtml } from "../lib/prompt";
 import { exportPptx } from "../lib/ppt";
 
@@ -31,6 +31,8 @@ const runningHere = computed(
 
 const current = computed(() => slides.value[currentIdx.value] ?? null);
 const currentSlideId = computed(() => current.value?.id ?? null);
+const inspectMode = ref(false);
+const chatPanelRef = ref<{ prepend: (t: string) => void } | null>(null);
 // 是否正在生成/修改当前页（思考流卡片只在此页显示）
 const runningOnCurrent = computed(
   () =>
@@ -133,13 +135,28 @@ async function onChat(text: string) {
     role: "user",
     content: text,
   });
-  await sendChat(projectId, slides.value, currentIdx.value, text);
+  // 解析调试模式选中的元素块（若存在）
+  let element: { html: string; selector: string } | undefined;
+  const m = text.match(/【选中元素】\n```html\n([\s\S]*?)```\n定位：(.+)/);
+  if (m) {
+    element = { html: m[1].trim(), selector: m[2].trim() };
+  }
+  await sendChat(projectId, slides.value, currentIdx.value, text, element);
   slides.value = await listSlides(projectId);
   await loadMessages();
 }
 
+function onPick(payload: { html: string; selector: string }) {
+  const text = `【选中元素】\n\`\`\`html\n${payload.html}\n\`\`\`\n定位：${payload.selector}`;
+  chatPanelRef.value?.prepend(text);
+}
+
+async function cancelRun() {
+  await cancelGeneration();
+}
+
 async function doExport() {
-  await exportPptx(slides.value, projectId);
+  await exportPptx(slides.value, projectId, project.value?.title);
 }
 </script>
 
@@ -158,8 +175,13 @@ async function doExport() {
           生成大纲
         </button>
         <template v-else>
-          <button :disabled="busy" @click="genAll">生成全部 HTML</button>
+          <button v-if="busy" class="danger" @click="cancelRun">取消</button>
+          <button v-else @click="genAll">生成全部 HTML</button>
           <button class="primary" :disabled="busy" @click="doExport">导出 PPT</button>
+          <label class="toggle" :class="{ on: inspectMode }">
+            <input type="checkbox" v-model="inspectMode" />
+            调试模式
+          </label>
         </template>
       </div>
     </div>
@@ -190,11 +212,17 @@ async function doExport() {
       </aside>
 
       <section class="e-preview">
-        <SlidePreview v-if="current" :html="currentHtml" />
+        <SlidePreview
+          v-if="current"
+          :html="currentHtml"
+          :inspect-mode="inspectMode"
+          @pick="onPick"
+        />
         <div v-else class="empty muted">生成大纲后这里显示预览</div>
       </section>
 
       <ChatPanel
+        ref="chatPanelRef"
         :messages="messages"
         :running="runningOnCurrent"
         :reasoning="runningOnCurrent ? genState.reasoning : ''"
@@ -269,5 +297,27 @@ async function doExport() {
 .empty {
   color: var(--muted);
   padding: 40px;
+}
+.danger {
+  background: #e03131;
+  color: #fff;
+  border-color: #e03131;
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.toggle input {
+  margin: 0;
+}
+.toggle.on {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 </style>

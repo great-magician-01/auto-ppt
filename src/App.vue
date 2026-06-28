@@ -42,7 +42,7 @@ import Icon from "./components/Icon.vue";
             </linearGradient>
           </defs>
         </svg>
-        <span>AutoPPT</span>
+        <span>纸光幻演</span>
       </RouterLink>
       <nav>
         <RouterLink to="/projects">

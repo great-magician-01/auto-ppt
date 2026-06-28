@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import ChatPanel from "../components/ChatPanel.vue";
-import { genState, startOutline, sendOutlineChat } from "../lib/genStore";
+import { genState, startOutline, sendOutlineChat, cancelGeneration } from "../lib/genStore";
 import {
   getProject,
   listSlides,
@@ -98,6 +98,7 @@ function goEditor() {
       </div>
       <div class="row">
         <span class="muted">{{ genState.status }}</span>
+        <button v-if="isRunning" class="danger" @click="cancelGeneration">取消</button>
         <button class="primary" :disabled="!slides.length" @click="goEditor">
           进入编辑器 →
         </button>
@@ -219,5 +220,10 @@ function goEditor() {
 }
 .ocard li {
   font-size: 13px;
+}
+.danger {
+  background: #e03131;
+  color: #fff;
+  border-color: #e03131;
 }
 </style>

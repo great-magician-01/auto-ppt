@@ -26,6 +26,12 @@ function onSend() {
   emit("send", text);
   input.value = "";
 }
+
+/** 把文本插入输入框开头（调试模式点选元素后调用）。 */
+function prepend(text: string) {
+  input.value = text + "\n" + input.value;
+}
+defineExpose({ prepend });
 </script>
 
 <template>

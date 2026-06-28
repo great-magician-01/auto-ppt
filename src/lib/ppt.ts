@@ -35,8 +35,11 @@ export async function renderSlideToDataUrl(html: string): Promise<string> {
     await nextFrame();
     const slideEl = doc.querySelector(".slide") as HTMLElement | null;
     const target: HTMLElement = slideEl ?? doc.body;
-    // 截 .slide 元素本身（已固定 1920×1080），避免 iframe 边距干扰
-    return await domToPng(target, { scale: 1, backgroundColor: "#ffffff" });
+    // 截 .slide 元素本身（已固定 1920×1080），避免 iframe 边距干扰。
+    // 注意：不要传 backgroundColor —— modern-screenshot 会把它以 !important 覆盖到
+    // 克隆根节点上，从而抹掉 .slide 自身的 background:var(--background)（深色背景被强改为白）。
+    // 画布底色由 iframe 的 background:#ffffff 提供，仅当 .slide 背景透明时才透出白色。
+    return await domToPng(target, { scale: 1 });
   } finally {
     host.remove();
   }
@@ -45,11 +48,12 @@ export async function renderSlideToDataUrl(html: string): Promise<string> {
 /** 把幻灯片数组导出为 pptx（每页一张全幅图）并保存到用户选择的路径。 */
 export async function exportPptx(
   slides: Slide[],
-  projectId: number
+  projectId: number,
+  title?: string
 ): Promise<string> {
   const pptx = new pptxgen();
   pptx.layout = "LAYOUT_WIDE"; // 13.333 x 7.5 inches, 16:9
-  pptx.author = "AutoPPT";
+  pptx.author = "纸光幻演";
 
   for (const slide of slides) {
     if (!slide.html_content) continue;
@@ -61,9 +65,13 @@ export async function exportPptx(
   const result = (await pptx.write({ outputType: "blob" })) as Blob;
   const buf = new Uint8Array(await result.arrayBuffer());
 
+  // 文件名默认用项目标题（去非法字符）；空则 fallback
+  const safeName = (title ?? "").replace(/[\\/:*?"<>|]/g, "").trim();
+  const defaultPath = (safeName ? safeName : "presentation") + ".pptx";
+
   const path = await save({
     title: "保存 PPT",
-    defaultPath: "presentation.pptx",
+    defaultPath,
     filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
   });
   if (!path) throw new Error("已取消导出");

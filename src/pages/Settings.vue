@@ -2,64 +2,113 @@
 import { ref, watch, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  getSettings,
-  saveSettings,
+  listAiConfigs,
+  saveAiConfig,
+  deleteAiConfig,
+  setActiveAi,
   getModelsCache,
   saveModelsCache,
-  type ApiSettings,
-} from "../lib/settings";
+  getSetting,
+  setSetting,
+  type AiConfig,
+} from "../lib/aiConfig";
 import Icon from "../components/Icon.vue";
 
 const CUSTOM = "__custom__";
-const form = ref<ApiSettings>({
-  api_base: "",
-  api_key: "",
-  model: "",
-  thinking_mode: false,
-  thinking_effort: "high",
-});
+const configs = ref<AiConfig[]>([]);
+const editing = ref<AiConfig | null>(null);
 const models = ref<string[]>([]);
 const modelChoice = ref<string>("");
 const showKey = ref(false);
 const loadingModels = ref(false);
 const saved = ref(false);
 
-function syncChoice() {
-  // 用户正在「自定义输入」时不打断；否则跟随已保存模型
-  // （不在列表时由下拉兜底 option 显示）
-  if (modelChoice.value === CUSTOM) return;
-  modelChoice.value = form.value.model ? form.value.model : CUSTOM;
+// app 级开关：自动自检（仅多模态 AI 生效）
+const autoSelfcheck = ref(true);
+
+function emptyConfig(): AiConfig {
+  return {
+    name: "",
+    api_base: "",
+    api_key: "",
+    model: "",
+    format: "openai",
+    multimodal: false,
+    thinking_mode: false,
+    thinking_effort: "high",
+    enabled: false,
+    models_cache: [],
+  };
 }
-watch(() => form.value.model, syncChoice);
+
+function syncChoice() {
+  if (modelChoice.value === CUSTOM) return;
+  modelChoice.value = editing.value?.model ? editing.value.model : CUSTOM;
+}
+watch(() => editing.value?.model, syncChoice);
 watch(models, syncChoice);
 watch(
-  () => form.value.api_base,
+  () => editing.value?.api_base,
   (v, old) => {
-    if (old && v !== old) {
+    if (editing.value && old && v !== old) {
       models.value = [];
-      saveModelsCache([]);
+      editing.value.models_cache = [];
+    }
+  }
+);
+watch(
+  () => editing.value?.format,
+  (v, old) => {
+    if (editing.value && old && v !== old) {
+      models.value = [];
+      editing.value.models_cache = [];
     }
   }
 );
 
 onMounted(async () => {
-  form.value = await getSettings();
-  models.value = await getModelsCache();
-  syncChoice();
+  await load();
+  autoSelfcheck.value = (await getSetting("auto_selfcheck")) !== "false";
 });
 
+async function load() {
+  configs.value = await listAiConfigs();
+  if (!editing.value) editing.value = configs.value[0] ?? null;
+  if (editing.value?.id) {
+    models.value = await getModelsCache(editing.value.id);
+  }
+  syncChoice();
+}
+
+function selectConfig(c: AiConfig) {
+  editing.value = { ...c };
+  models.value = c.models_cache ?? [];
+  syncChoice();
+}
+
+function newConfig() {
+  editing.value = emptyConfig();
+  models.value = [];
+  modelChoice.value = CUSTOM;
+}
+
 async function fetchModels() {
-  if (!form.value.api_base || !form.value.api_key) {
+  if (!editing.value) return;
+  if (!editing.value.api_base || !editing.value.api_key) {
     alert("请先填写 API 地址和 Key");
     return;
   }
   loadingModels.value = true;
   try {
     const ids = await invoke<string[]>("list_models", {
-      config: { api_base: form.value.api_base, api_key: form.value.api_key },
+      config: {
+        api_base: editing.value.api_base,
+        api_key: editing.value.api_key,
+        format: editing.value.format,
+      },
     });
     models.value = ids;
-    await saveModelsCache(ids);
+    editing.value.models_cache = ids;
     if (!ids.length) alert("未返回任何模型，可改用自定义输入");
   } catch (e: any) {
     alert("获取模型列表失败：" + e);
@@ -72,37 +121,100 @@ async function fetchModels() {
 function onChoice(e: Event) {
   const v = (e.target as HTMLSelectElement).value;
   modelChoice.value = v;
-  if (v !== CUSTOM) form.value.model = v;
+  if (editing.value && v !== CUSTOM) editing.value.model = v;
 }
 
 async function save() {
-  await saveSettings(form.value);
+  if (!editing.value) return;
+  if (!editing.value.name.trim()) editing.value.name = editing.value.model || "未命名 AI";
+  const wasNew = !editing.value.id;
+  const id = await saveAiConfig(editing.value);
+  editing.value.id = id;
+  if (editing.value.models_cache) await saveModelsCache(id, editing.value.models_cache);
+  // 新建的第一个配置自动启用
+  if (wasNew && configs.value.length === 0) {
+    await setActiveAi(id);
+    editing.value.enabled = true;
+  }
+  configs.value = await listAiConfigs();
   saved.value = true;
   setTimeout(() => (saved.value = false), 2000);
+}
+
+async function enable(c: AiConfig) {
+  if (!c.id) return;
+  await setActiveAi(c.id);
+  configs.value = await listAiConfigs();
+}
+
+async function remove(c: AiConfig) {
+  if (!c.id) return;
+  if (!confirm(`删除配置「${c.name}」？`)) return;
+  await deleteAiConfig(c.id);
+  configs.value = await listAiConfigs();
+  editing.value = configs.value[0] ?? null;
+}
+
+async function toggleAutoSelfcheck(v: boolean) {
+  autoSelfcheck.value = v;
+  await setSetting("auto_selfcheck", v ? "true" : "false");
 }
 </script>
 
 <template>
   <div class="page">
-    <h2>API 设置</h2>
+    <h2>AI 配置</h2>
     <p class="muted">
-      OpenAI 兼容格式。程序自动在 API 地址后补 <code>/chat/completions</code>。<br />
-      DeepSeek 填 <code>https://api.deepseek.com</code>；OpenAI 官方填
-      <code>https://api.openai.com/v1</code>。
+      支持配置多个 AI 并单选启用。OpenAI 格式自动补 <code>/chat/completions</code>，Anthropic 格式走 <code>/v1/messages</code>。
     </p>
-    <div class="col form">
+
+    <div class="list">
+      <div
+        v-for="c in configs"
+        :key="c.id"
+        class="cfg-row"
+        :class="{ active: editing?.id === c.id }"
+        @click="selectConfig(c)"
+      >
+        <div class="cfg-info">
+          <span class="cfg-name">{{ c.name }}</span>
+          <span class="badge" :class="c.format">{{ c.format }}</span>
+          <span v-if="c.multimodal" class="badge mm">多模态</span>
+          <span v-if="c.enabled" class="badge on">启用中</span>
+        </div>
+        <div class="cfg-actions" @click.stop>
+          <button class="ghost" :class="{ primary: c.enabled }" @click="enable(c)">
+            {{ c.enabled ? "已启用" : "启用" }}
+          </button>
+          <button class="ghost" @click="remove(c)">删除</button>
+        </div>
+      </div>
+      <button class="ghost" @click="newConfig">+ 新建 AI 配置</button>
+    </div>
+
+    <div v-if="editing" class="col form">
+      <label>
+        名称
+        <input v-model="editing.name" placeholder="如：DeepSeek / Claude" />
+      </label>
+
+      <div class="field">
+        <span class="label">格式</span>
+        <select v-model="editing.format">
+          <option value="openai">openai（兼容）</option>
+          <option value="anthropic">anthropic</option>
+        </select>
+        <span class="muted">旧配置默认 openai</span>
+      </div>
+
       <label>
         API 地址 (api_base)
-        <input v-model="form.api_base" placeholder="https://api.deepseek.com" />
+        <input v-model="editing.api_base" placeholder="https://api.deepseek.com" />
       </label>
       <label>
         API Key
         <div class="key-row">
-          <input
-            v-model="form.api_key"
-            :type="showKey ? 'text' : 'password'"
-            placeholder="sk-..."
-          />
+          <input v-model="editing.api_key" :type="showKey ? 'text' : 'password'" placeholder="sk-..." />
           <button class="ghost icon-btn" type="button" @click="showKey = !showKey">
             <Icon :name="showKey ? 'eye-off' : 'eye'" :size="16" />
           </button>
@@ -114,46 +226,55 @@ async function save() {
         <div class="model-row">
           <select :value="modelChoice" @change="onChoice">
             <option :value="CUSTOM">自定义输入</option>
-            <option
-              v-if="form.model && !models.includes(form.model)"
-              :value="form.model"
-            >
-              {{ form.model }}（已保存）
+            <option v-if="editing.model && !models.includes(editing.model)" :value="editing.model">
+              {{ editing.model }}（已保存）
             </option>
             <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
           </select>
-          <button
-            class="ghost"
-            @click="fetchModels"
-            :disabled="loadingModels || !form.api_base"
-          >
+          <button class="ghost" @click="fetchModels" :disabled="loadingModels || !editing.api_base">
             {{ loadingModels ? "获取中…" : "获取列表" }}
           </button>
         </div>
-        <span class="muted">填好地址和 Key 后点「获取列表」拉取下拉</span>
       </div>
       <label v-if="modelChoice === CUSTOM" class="custom-model">
-        <span class="lab">
-          <Icon name="pencil" :size="14" /> 自定义模型 (model)
-        </span>
-        <input v-model="form.model" placeholder="deepseek-v4-flash" />
+        <span class="lab"><Icon name="pencil" :size="14" /> 自定义模型 (model)</span>
+        <input v-model="editing.model" placeholder="deepseek-v4-flash" />
       </label>
 
       <div class="field">
+        <span class="label">多模态</span>
+        <select v-model="editing.multimodal">
+          <option :value="false">否</option>
+          <option :value="true">是</option>
+        </select>
+        <span class="muted">开启后生成每页自动截图自检（需模型支持图片输入）</span>
+      </div>
+
+      <div class="field">
         <span class="label">思考模式</span>
-        <select v-model="form.thinking_mode">
+        <select v-model="editing.thinking_mode">
           <option :value="false">关</option>
           <option :value="true">开</option>
         </select>
-        <span class="muted">开启后发送 thinking(enabled) 与 reasoning_effort</span>
       </div>
       <div class="field">
         <span class="label">思考强度</span>
-        <select v-model="form.thinking_effort" :disabled="!form.thinking_mode">
+        <select v-model="editing.thinking_effort" :disabled="!editing.thinking_mode">
           <option value="high">high</option>
           <option value="max">max</option>
         </select>
-        <span class="muted">仅在思考模式开启时发送</span>
+      </div>
+
+      <div class="field">
+        <span class="label">自动自检</span>
+        <select
+          :value="autoSelfcheck ? 'true' : 'false'"
+          @change="toggleAutoSelfcheck(($event.target as HTMLSelectElement).value === 'true')"
+        >
+          <option value="true">开</option>
+          <option value="false">关</option>
+        </select>
+        <span class="muted">多模态 AI 每页生成后自动截图自检；关闭以节省调用</span>
       </div>
 
       <div class="row">
@@ -168,6 +289,57 @@ async function save() {
 .page {
   padding: 24px;
   max-width: 640px;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+.cfg-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  gap: 8px;
+}
+.cfg-row.active {
+  border-color: var(--primary);
+  background: #eef;
+}
+.cfg-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cfg-name {
+  font-weight: 600;
+}
+.badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eee;
+}
+.badge.anthropic {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+.badge.mm {
+  background: #dcfce7;
+  color: #15803d;
+}
+.badge.on {
+  background: var(--primary);
+  color: #fff;
+}
+.cfg-actions {
+  display: flex;
+  gap: 6px;
 }
 .form {
   gap: 16px;
@@ -227,5 +399,10 @@ code {
   padding: 6px 10px;
   display: flex;
   align-items: center;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 </style>
