@@ -1,36 +1,179 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#4263eb"/>
-      <stop offset="1" stop-color="#2f49c0"/>
+    <!-- 背景：深邃科技蓝紫渐变，带宇宙感 -->
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#1a1a3e"/>
+      <stop offset="50%" stop-color="#0d0d2b"/>
+      <stop offset="100%" stop-color="#050518"/>
+    </radialGradient>
+
+    <!-- 霓虹外发光 -->
+    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur1"/>
+      <feGaussianBlur stdDeviation="24" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- 强霓虹发光（用于核心） -->
+    <filter id="strongGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="20" result="blur1"/>
+      <feGaussianBlur stdDeviation="40" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- 纸张全息渐变 -->
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#e0e8ff" stop-opacity="0.85"/>
     </linearGradient>
-    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#9d6bff"/>
-      <stop offset="1" stop-color="#7B2FF7"/>
+
+    <!-- 卷轴杆渐变：科技紫 -->
+    <linearGradient id="scrollEdge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00d4ff"/>
+      <stop offset="50%" stop-color="#7b2ff7"/>
+      <stop offset="100%" stop-color="#00d4ff"/>
     </linearGradient>
+
+    <!-- 顶部光晕：青蓝色科技光 -->
+    <radialGradient id="topGlow" cx="50%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#00d4ff" stop-opacity="0.3"/>
+      <stop offset="50%" stop-color="#7b2ff7" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#7b2ff7" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 中心AI核心光芒 -->
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00ffff" stop-opacity="0.8"/>
+      <stop offset="30%" stop-color="#00d4ff" stop-opacity="0.4"/>
+      <stop offset="70%" stop-color="#7b2ff7" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#7b2ff7" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 电路纹理 -->
+    <pattern id="circuit" width="120" height="120" patternUnits="userSpaceOnUse">
+      <path d="M60,0 L60,40 L80,40 L80,60" fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.12"/>
+      <path d="M0,60 L40,60 L40,80 L60,80" fill="none" stroke="#7b2ff7" stroke-width="1" opacity="0.1"/>
+      <circle cx="60" cy="40" r="2.5" fill="#00d4ff" opacity="0.2"/>
+      <circle cx="80" cy="60" r="2.5" fill="#00d4ff" opacity="0.15"/>
+      <circle cx="40" cy="80" r="2.5" fill="#7b2ff7" opacity="0.15"/>
+      <circle cx="60" cy="60" r="2" fill="#ffffff" opacity="0.1"/>
+    </pattern>
+
+    <!-- 纸张投影 -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="24" flood-color="#00d4ff" flood-opacity="0.15"/>
+    </filter>
   </defs>
 
-  <!-- 蓝色圆角背景 -->
+  <!-- 背景 -->
   <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg)"/>
 
-  <!-- 卡片投影/背层（深一档蓝灰，向右下偏移营造厚度） -->
-  <rect x="288" y="340" width="540" height="420" rx="44" ry="44" fill="#c2cbef"/>
+  <!-- 电路纹理覆盖 -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#circuit)"/>
 
-  <!-- 白色幻灯片卡片 -->
-  <rect x="248" y="300" width="540" height="420" rx="44" ry="44" fill="#ffffff"/>
+  <!-- 顶部科技光 -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#topGlow)"/>
 
-  <!-- 标题条（主蓝，与背景呼应） -->
-  <rect x="298" y="358" width="440" height="72" rx="20" ry="20" fill="#3b5bdb"/>
+  <!-- 中心AI核心光芒 -->
+  <circle cx="512" cy="460" r="380" fill="url(#coreGlow)"/>
 
-  <!-- 正文行（浅灰） -->
-  <rect x="298" y="482" width="392" height="34" rx="17" ry="17" fill="#d7dce8"/>
-  <rect x="298" y="548" width="330" height="34" rx="17" ry="17" fill="#d7dce8"/>
-  <rect x="298" y="614" width="248" height="34" rx="17" ry="17" fill="#d7dce8"/>
+  <!-- === 科技感卷轴结构 === -->
 
-  <!-- AI 闪光（右上，紫色四角星） -->
-  <path d="M778,168 Q778,250 696,250 Q778,250 778,332 Q778,250 860,250 Q778,250 778,168 Z" fill="url(#spark)"/>
-  <path d="M778,214 Q778,250 742,250 Q778,250 778,286 Q778,250 814,250 Q778,250 778,214 Z" fill="#ffffff" opacity="0.85"/>
+  <!-- 左侧卷轴杆（霓虹管效果） -->
+  <rect x="238" y="250" width="36" height="520" rx="18" fill="#0a1628" stroke="#00d4ff" stroke-width="2.5" filter="url(#neonGlow)"/>
+  <rect x="242" y="254" width="28" height="512" rx="14" fill="#00d4ff" opacity="0.15"/>
 
-  <!-- 小闪光（左上，平衡构图） -->
-  <path d="M298,150 Q298,180 268,180 Q298,180 298,210 Q298,180 328,180 Q298,180 298,150 Z" fill="#b6a6ff"/>
+  <!-- 右侧卷轴杆 -->
+  <rect x="750" y="250" width="36" height="520" rx="18" fill="#0a1628" stroke="#7b2ff7" stroke-width="2.5" filter="url(#neonGlow)"/>
+  <rect x="754" y="254" width="28" height="512" rx="14" fill="#7b2ff7" opacity="0.15"/>
+
+  <!-- 卷轴轴头（六边形科技节点） -->
+  <polygon points="256,230 271,218 286,230 286,248 271,260 256,248" fill="#0a1628" stroke="#00d4ff" stroke-width="2.5" filter="url(#neonGlow)"/>
+  <polygon points="738,230 753,218 768,230 768,248 753,260 738,248" fill="#0a1628" stroke="#7b2ff7" stroke-width="2.5" filter="url(#neonGlow)"/>
+  <polygon points="256,776 271,764 286,776 286,794 271,806 256,794" fill="#0a1628" stroke="#00d4ff" stroke-width="2.5" filter="url(#neonGlow)"/>
+  <polygon points="738,776 753,764 768,776 768,794 753,806 738,794" fill="#0a1628" stroke="#7b2ff7" stroke-width="2.5" filter="url(#neonGlow)"/>
+
+  <!-- 轴头中心发光点 -->
+  <circle cx="271" cy="239" r="5" fill="#00d4ff" filter="url(#neonGlow)"/>
+  <circle cx="753" cy="239" r="5" fill="#7b2ff7" filter="url(#neonGlow)"/>
+  <circle cx="271" cy="785" r="5" fill="#00d4ff" filter="url(#neonGlow)"/>
+  <circle cx="753" cy="785" r="5" fill="#7b2ff7" filter="url(#neonGlow)"/>
+
+  <!-- 展开的发光纸张 -->
+  <rect x="274" y="250" width="476" height="520" rx="4" fill="url(#paper)" filter="url(#shadow)"/>
+
+  <!-- 纸张内容（极简科技风） -->
+  <rect x="314" y="310" width="396" height="40" rx="6" fill="#00d4ff" opacity="0.2"/>
+  <rect x="314" y="380" width="340" height="16" rx="8" fill="#7b2ff7" opacity="0.15"/>
+  <rect x="314" y="412" width="280" height="16" rx="8" fill="#7b2ff7" opacity="0.12"/>
+  <rect x="314" y="444" width="340" height="16" rx="8" fill="#7b2ff7" opacity="0.1"/>
+
+  <!-- 数据可视化区域（模拟AI生成的图表） -->
+  <rect x="314" y="500" width="396" height="200" rx="8" fill="#f0f4ff" opacity="0.6"/>
+  <polyline points="340,660 380,620 420,640 460,580 500,600 540,540 580,560 620,520 660,540 700,500"
+            fill="none" stroke="#7b2ff7" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+  <polyline points="340,670 380,630 420,650 460,590 500,610 540,550 580,570 620,530 660,550 700,510"
+            fill="none" stroke="#00d4ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+
+  <!-- 纸张边缘高光 -->
+  <rect x="274" y="250" width="476" height="2" fill="#ffffff" opacity="0.8"/>
+  <rect x="274" y="250" width="2" height="520" fill="#ffffff" opacity="0.4"/>
+
+  <!-- === 科技感粒子/数据流 === -->
+  <!-- 发光粒子 -->
+  <circle cx="512" cy="260" r="5" fill="#00ffff" filter="url(#neonGlow)"/>
+  <circle cx="460" cy="235" r="3" fill="#00d4ff" opacity="0.8"/>
+  <circle cx="564" cy="228" r="4" fill="#7b2ff7" opacity="0.8"/>
+  <circle cx="400" cy="285" r="2.5" fill="#ffffff" opacity="0.7"/>
+  <circle cx="620" cy="275" r="3" fill="#00d4ff" opacity="0.9"/>
+  <circle cx="360" cy="375" r="2" fill="#7b2ff7" opacity="0.6"/>
+  <circle cx="660" cy="355" r="2.5" fill="#00ffff" opacity="0.7"/>
+  <circle cx="320" cy="470" r="2" fill="#ffffff" opacity="0.5"/>
+  <circle cx="700" cy="450" r="2.5" fill="#7b2ff7" opacity="0.6"/>
+  <circle cx="380" cy="555" r="2" fill="#00d4ff" opacity="0.5"/>
+  <circle cx="640" cy="575" r="2" fill="#00ffff" opacity="0.6"/>
+  <circle cx="420" cy="645" r="1.5" fill="#ffffff" opacity="0.4"/>
+  <circle cx="600" cy="635" r="2" fill="#7b2ff7" opacity="0.5"/>
+
+  <!-- 数据连接线（模拟神经网络/数据流） -->
+  <line x1="460" y1="235" x2="512" y2="260" stroke="#00d4ff" stroke-width="1" opacity="0.4"/>
+  <line x1="564" y1="228" x2="512" y2="260" stroke="#7b2ff7" stroke-width="1" opacity="0.4"/>
+  <line x1="400" y1="285" x2="460" y2="235" stroke="#00d4ff" stroke-width="0.8" opacity="0.3"/>
+  <line x1="620" y1="275" x2="564" y2="228" stroke="#7b2ff7" stroke-width="0.8" opacity="0.3"/>
+
+  <!-- === 核心AI星光（四角星，科技感强化） === -->
+  <!-- 外发光层 -->
+  <path d="M512,180 Q512,280 412,280 Q512,280 512,380 Q512,280 612,280 Q512,280 512,180 Z"
+        fill="none" stroke="#00ffff" stroke-width="3" filter="url(#strongGlow)" opacity="0.6"/>
+  <!-- 主体星光 -->
+  <path d="M512,200 Q512,280 432,280 Q512,280 512,360 Q512,280 592,280 Q512,280 512,200 Z"
+        fill="#00d4ff" filter="url(#strongGlow)"/>
+  <!-- 内核 -->
+  <path d="M512,220 Q512,280 452,280 Q512,280 512,340 Q512,280 572,280 Q512,280 512,220 Z"
+        fill="#ffffff" opacity="0.9"/>
+  <!-- 中心菱形（AI核心） -->
+  <polygon points="512,250 522,260 512,270 502,260" fill="#00ffff" filter="url(#neonGlow)"/>
+
+  <!-- 小星光（左上，辅助节点） -->
+  <path d="M380,180 Q380,220 340,220 Q380,220 380,260 Q380,220 420,220 Q380,220 380,180 Z"
+        fill="#7b2ff7" filter="url(#neonGlow)" opacity="0.8"/>
+  <path d="M380,200 Q380,220 360,220 Q380,220 380,240 Q380,220 400,220 Q380,220 380,200 Z"
+        fill="#ffffff" opacity="0.9"/>
+
+  <!-- 小星光（右下，数据节点） -->
+  <path d="M640,690 Q640,720 610,720 Q640,720 640,750 Q640,720 670,720 Q640,720 640,690 Z"
+        fill="#00d4ff" filter="url(#neonGlow)" opacity="0.6"/>
+
+  <!-- === 底部装饰：扫描线效果 === -->
+  <line x1="274" y1="750" x2="750" y2="750" stroke="#00d4ff" stroke-width="1" opacity="0.3"/>
+  <circle cx="274" cy="750" r="3" fill="#00d4ff" opacity="0.6"/>
+  <circle cx="750" cy="750" r="3" fill="#00d4ff" opacity="0.6"/>
 </svg>
