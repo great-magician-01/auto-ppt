@@ -2,7 +2,7 @@
 name = "tauri-app"
 version = "0.1.0"
 description = "AutoPPT - AI 自动生成 PPT"
-authors = ["you"]
+authors = ["great-magician-01"]
 edition = "2021"
 
 [lib]
