@@ -7,10 +7,32 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies & build output
 node_modules
 dist
 dist-ssr
 *.local
+
+# Env files（API key 等敏感配置；保留示例文件入库）
+.env
+.env.*
+!.env.example
+
+# TypeScript 增量构建缓存
+*.tsbuildinfo
+
+# SQLite 运行时数据库及 WAL/SHM 边车文件
+# （正式运行时数据库在系统 appdata 目录，此处仅为防御性忽略）
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Claude Code 本地项目数据（settings.local.json 等）；CLAUDE.md 本身在仓库根，需入库
+.claude/
+
+# Rust / Tauri 产物在 src-tauri/.gitignore 中忽略（target/、gen/schemas）。
+# 注意：src-tauri/Cargo.lock 是二进制 crate，刻意入库以保证可复现构建，勿忽略。
 
 # Editor directories and files
 .vscode/*
@@ -22,3 +44,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Windows 系统文件
+Thumbs.db
+desktop.ini
