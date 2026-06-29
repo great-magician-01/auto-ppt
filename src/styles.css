@@ -86,3 +86,16 @@ a {
   color: var(--muted);
   font-size: 12px;
 }
+/* 标题栏左侧块：允许收缩，使超长主题能被截断而非撑开布局 */
+.header-left {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+/* 主题文本：单行截断省略号，超长时不破坏标题栏；悬浮看全文由 :title 提供 */
+.topic-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}

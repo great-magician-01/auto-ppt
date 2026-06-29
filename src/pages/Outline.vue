@@ -100,9 +100,9 @@ function goEditor() {
 <template>
   <div class="outline-page" v-if="project">
     <div class="o-header">
-      <div>
+      <div class="header-left">
         <h3>大纲工作台 · {{ project.title }}</h3>
-        <span class="muted">主题：{{ project.topic }}</span>
+        <span class="muted topic-text" :title="project.topic">主题：{{ project.topic }}</span>
       </div>
       <div class="row">
         <span class="muted">{{ genState.status }}</span>

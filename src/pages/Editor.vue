@@ -182,12 +182,12 @@ async function doExport() {
 <template>
   <div class="editor" v-if="project">
     <div class="e-header">
-      <div class="col">
+      <div class="col header-left">
         <div class="row">
           <h3>{{ project.title }}</h3>
           <span class="muted">{{ status }}</span>
         </div>
-        <span class="muted">主题：{{ project.topic }}</span>
+        <span class="muted topic-text" :title="project.topic">主题：{{ project.topic }}</span>
       </div>
       <div class="row">
         <button v-if="!slides.length" class="primary" :disabled="busy" @click="goOutline">
