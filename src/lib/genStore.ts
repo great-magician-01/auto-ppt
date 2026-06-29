@@ -82,7 +82,7 @@ export async function startOutline(
   try {
     const msgs: ChatMsg[] = [
       { role: "system", content: "你是专业 PPT 设计师，严格按要求返回 JSON。" },
-      { role: "user", content: outlinePrompt(topic, 8, style) },
+      { role: "user", content: outlinePrompt(topic, style) },
     ];
     for (let attempt = 1; attempt <= 2; attempt++) {
       if (genState.cancelled) break;
@@ -319,15 +319,13 @@ export async function startSlide(
   }
 }
 
-// 若启用 AI 为多模态且 auto_selfcheck 开，对第 idx 页做自检。
+// auto_selfcheck 开时对第 idx 页做自检：多模态发截图+HTML，非多模态仅发 HTML。
 async function maybeSelfCheck(
   projectId: number,
   slides: Slide[],
   idx: number
 ): Promise<void> {
   if (genState.cancelled) return;
-  const ai = await getActiveAi();
-  if (!ai?.multimodal) return;
   const flag = await getSetting("auto_selfcheck");
   if (flag === "false") return; // 默认开（null/其他均视为开）
   await selfCheckSlide(projectId, slides, idx);
@@ -344,7 +342,7 @@ function themeFingerprint(html: string): string {
   return decls.map((d) => d.replace(/\s+/g, "").toLowerCase()).sort().join("|");
 }
 
-/** 多模态自检：截图 → 发图+HTML 给 AI → 流式改写 → 校验后写库。 */
+/** 自检：多模态发截图+HTML、非多模态仅发 HTML → 流式改写 → 校验后写库（破坏主题则还原）。 */
 export async function selfCheckSlide(
   projectId: number,
   slides: Slide[],
@@ -360,10 +358,18 @@ export async function selfCheckSlide(
   genState.phase = "selfcheck";
   resetBuffers();
   try {
-    const dataUrl = await renderSlideToDataUrl(slide.html_content);
+    // 多模态：截图并附图自检；非多模态：跳过截图，仅发 HTML 让 AI 依据样式自检
+    const ai = await getActiveAi();
+    const multimodal = !!ai?.multimodal;
+    const dataUrl = multimodal ? await renderSlideToDataUrl(slide.html_content) : null;
+    const userMsg: ChatMsg = {
+      role: "user",
+      content: selfCheckPrompt(slide.html_content, multimodal),
+    };
+    if (dataUrl) userMsg.images = [dataUrl];
     const msgs: ChatMsg[] = [
       { role: "system", content: "你是 PPT 自检员，只输出改进后的完整 HTML。" },
-      { role: "user", content: selfCheckPrompt(slide.html_content), images: [dataUrl] },
+      userMsg,
     ];
     await chat(
       msgs,

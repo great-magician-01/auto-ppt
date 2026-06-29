@@ -13,7 +13,6 @@ import {
 
 export function outlinePrompt(
   topic: string,
-  slideCount: number,
   style?: string | null
 ): string {
   const styleMode = stylesForPrompt(style);
@@ -27,7 +26,9 @@ export function outlinePrompt(
     styleReturnClause = `\n4. style：你在上面挑选的风格 id（字符串）。`;
   }
 
-  return `你是一位专业的 PPT 设计师与信息架构师。请为主题「${topic}」设计一份 ${slideCount} 页的精美 PPT，先确定统一的设计系统，再给出每页大纲。${styleSection}
+  return `你是一位专业的 PPT 设计师与信息架构师。请为主题「${topic}」设计一份精美的 PPT，先确定统一的设计系统，再给出每页大纲。${styleSection}
+
+【页数】由你根据主题内容的丰富程度自行判断决定：内容丰富的主题可多到 20 页以上，简单的主题可少至 6 页左右，以“每页都有实质信息、不空洞、不冗余”为原则。不要固定页数，也不要为了凑数而堆砌页或拆得过碎。
 
 【输出要求】
 1. design_tokens：专业协调的配色与字体方案，字段为 primary / accent / background / surface / text / textMuted / fonts / titleSize / bodySize（颜色用 #hex；titleSize 72–96px、bodySize 32–44px，必须保证投影可读，禁止偏小）。字体用系统通用字体族（如 "Microsoft YaHei"/"PingFang SC"/sans-serif 或 monospace），不要依赖需联网加载的字体。
@@ -146,9 +147,15 @@ export function cleanHtml(raw: string): string {
   return s.replace(/^```(?:html)?\s*/i, "");
 }
 
-/** 多模态自检：对照截图与当前 HTML，仅修正溢出/排版/对齐问题，严禁改动主题样式。 */
-export function selfCheckPrompt(html: string): string {
-  return `你是 PPT 视觉自检员。对照附图（当前页面渲染截图）与下方当前 HTML，检查是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”。若有，仅做最小幅度修正；若无，原样返回该 HTML。
+/**
+ * 自检提示词：仅修正溢出/排版/对齐问题，严禁改动主题样式。
+ * 多模态（multimodal=true）对照渲染截图与 HTML；非多模态仅依据 HTML/CSS 推断（未附图）。
+ */
+export function selfCheckPrompt(html: string, multimodal = true): string {
+  const intro = multimodal
+    ? `对照附图（当前页面渲染截图）与下方当前 HTML，检查是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”。若有，仅做最小幅度修正；若无，原样返回该 HTML。`
+    : `仔细审阅下方当前页 HTML，依据其 CSS 与结构推断是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”（未附渲染截图，需从样式值判断）。若有，仅做最小幅度修正；若无，原样返回该 HTML。`;
+  return `你是 PPT 视觉自检员。${intro}
 
 当前 HTML：
 ${html}

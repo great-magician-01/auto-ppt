@@ -40,6 +40,21 @@ const runningOnCurrent = computed(
     genState.slideIdx === currentIdx.value &&
     (genState.phase === "slide" || genState.phase === "chat")
 );
+// 正在生成的页索引（slide/selfcheck 阶段）：在页列表显眼标记该页
+const generatingIdx = computed(() => {
+  if (
+    genState.running &&
+    genState.projectId === projectId &&
+    (genState.phase === "slide" || genState.phase === "selfcheck")
+  ) {
+    return genState.slideIdx;
+  }
+  return -1;
+});
+// 生成中标记文案：自检阶段显示「自检中」
+const genBadge = computed(() =>
+  genState.phase === "selfcheck" ? "自检中…" : "生成中…"
+);
 
 async function loadMessages() {
   const sid = currentSlideId.value;
@@ -196,16 +211,19 @@ async function doExport() {
           v-for="(s, i) in slides"
           :key="s.id"
           class="item"
-          :class="{ active: i === currentIdx }"
+          :class="{ active: i === currentIdx, generating: i === generatingIdx }"
           @click="currentIdx = i"
         >
           <span class="num">{{ i + 1 }}</span>
           <div class="col">
             <span class="t">{{ s.title || "(未命名)" }}</span>
-            <span class="muted">{{ s.html_content ? "已生成" : "待生成" }}</span>
+            <span class="muted" :class="{ 'is-gen': i === generatingIdx }">
+              <span v-if="i === generatingIdx" class="pulse" aria-hidden="true"></span>
+              {{ i === generatingIdx ? genBadge : s.html_content ? "已生成" : "待生成" }}
+            </span>
           </div>
           <button
-            v-if="!s.html_content"
+            v-if="!s.html_content && i !== generatingIdx"
             class="mini"
             :disabled="busy"
             @click.stop="genOne(i)"
@@ -278,6 +296,40 @@ async function doExport() {
 }
 .item.active {
   background: #e8edff;
+}
+/* 正在生成的页：琥珀色高亮 + 左侧色条，与蓝色选中态区分，显眼可辨 */
+.item.generating {
+  background: #fff4e6;
+  box-shadow: inset 3px 0 0 #f59f00;
+}
+.item.generating:hover {
+  background: #ffeacc;
+}
+.muted.is-gen {
+  color: #d9480f;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59f00;
+  flex: 0 0 auto;
+  animation: gen-pulse 1s ease-in-out infinite;
+}
+@keyframes gen-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
 }
 .num {
   font-weight: 700;

@@ -23,7 +23,7 @@ const showKey = ref(false);
 const loadingModels = ref(false);
 const saved = ref(false);
 
-// app 级开关：自动自检（仅多模态 AI 生效）
+// app 级开关：自动自检（多模态发图、非多模态仅发 HTML）
 const autoSelfcheck = ref(true);
 
 function emptyConfig(): AiConfig {
@@ -247,7 +247,7 @@ async function toggleAutoSelfcheck(v: boolean) {
           <option :value="false">否</option>
           <option :value="true">是</option>
         </select>
-        <span class="muted">开启后生成每页自动截图自检（需模型支持图片输入）</span>
+        <span class="muted">自检时附当前页截图（需模型支持图片输入）；关闭则仅发 HTML 自检</span>
       </div>
 
       <div class="field">
@@ -274,7 +274,7 @@ async function toggleAutoSelfcheck(v: boolean) {
           <option value="true">开</option>
           <option value="false">关</option>
         </select>
-        <span class="muted">多模态 AI 每页生成后自动截图自检；关闭以节省调用</span>
+        <span class="muted">每页生成后自动自检（多模态附截图、非多模态仅发 HTML）；关闭以节省调用</span>
       </div>
 
       <div class="row">

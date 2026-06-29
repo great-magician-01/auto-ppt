@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.1.0"
+version = "0.1.6"
 description = "AutoPPT - AI 自动生成 PPT"
 authors = ["great-magician-01"]
 edition = "2021"
