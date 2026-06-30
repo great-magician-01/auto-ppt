@@ -323,6 +323,144 @@ fn cancel_chat(abort_slot: State<'_, AbortSlot>) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+struct TavilyConfig {
+    api_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TavilySearchItem {
+    title: String,
+    url: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TavilySearchResult {
+    answer: String,
+    results: Vec<TavilySearchItem>,
+    credits: i64,
+}
+
+/// 联网搜索：POST https://api.tavily.com/search（Bearer）。固定 basic depth（1 积分/次）。
+#[tauri::command]
+async fn tavily_search(
+    config: TavilyConfig,
+    query: String,
+) -> Result<TavilySearchResult, String> {
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+    let body = serde_json::json!({
+        "query": query,
+        "search_depth": "basic",
+        "topic": "general",
+        "include_answer": true,
+        "max_results": 5,
+        "include_usage": true,
+    });
+    let resp = client
+        .post("https://api.tavily.com/search")
+        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {text}"));
+    }
+    let v: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
+    let answer = v["answer"].as_str().unwrap_or("").to_string();
+    let mut results = Vec::new();
+    if let Some(arr) = v["results"].as_array() {
+        for r in arr {
+            let content = r["content"].as_str().unwrap_or("").to_string();
+            let content = if content.len() > 1500 { content[..1500].to_string() } else { content };
+            results.push(TavilySearchItem {
+                title: r["title"].as_str().unwrap_or("").to_string(),
+                url: r["url"].as_str().unwrap_or("").to_string(),
+                content,
+            });
+        }
+    }
+    let credits = v["usage"]["credits"].as_i64().unwrap_or(1);
+    Ok(TavilySearchResult { answer, results, credits })
+}
+
+#[derive(Debug, Serialize)]
+struct TavilyExtractItem {
+    url: String,
+    raw_content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TavilyExtractResult {
+    results: Vec<TavilyExtractItem>,
+    failed: Vec<TavilyExtractItem>,
+    credits: i64,
+}
+
+/// 提取网页全文：POST https://api.tavily.com/extract（Bearer）。固定 basic depth（每 5 成功 URL = 1 积分）。
+#[tauri::command]
+async fn tavily_extract(
+    config: TavilyConfig,
+    urls: Vec<String>,
+) -> Result<TavilyExtractResult, String> {
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+    let body = serde_json::json!({
+        "urls": urls,
+        "format": "markdown",
+        "extract_depth": "basic",
+        "include_usage": true,
+    });
+    let resp = client
+        .post("https://api.tavily.com/extract")
+        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {text}"));
+    }
+    let v: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
+    let mut results = Vec::new();
+    if let Some(arr) = v["results"].as_array() {
+        for r in arr {
+            let raw = r["raw_content"].as_str().unwrap_or("").to_string();
+            let raw = if raw.len() > 4000 { raw[..4000].to_string() } else { raw };
+            results.push(TavilyExtractItem {
+                url: r["url"].as_str().unwrap_or("").to_string(),
+                raw_content: raw,
+            });
+        }
+    }
+    // failed_results 只有 url + error，这里归一为 {url, raw_content:"<failed: error>"} 便于前端展示
+    let mut failed = Vec::new();
+    if let Some(arr) = v["failed_results"].as_array() {
+        for r in arr {
+            let err = r["error"].as_str().unwrap_or("unknown");
+            failed.push(TavilyExtractItem {
+                url: r["url"].as_str().unwrap_or("").to_string(),
+                raw_content: format!("<failed: {}>", err),
+            });
+        }
+    }
+    let success = results.len() as i64;
+    let credits = v["usage"]["credits"]
+        .as_i64()
+        .unwrap_or_else(|| ((success + 4) / 5).max(0));
+    Ok(TavilyExtractResult { results, failed, credits })
+}
+
 /// 将二进制数据写入指定路径（导出 pptx 用，绕开 fs scope 限制）。
 #[tauri::command]
 fn save_file(path: String, data: Vec<u8>) -> Result<(), String> {
@@ -426,7 +564,7 @@ pub fn run() {
         )
         .manage(Mutex::new(None) as AbortSlot)
         .invoke_handler(tauri::generate_handler![
-            chat_stream, cancel_chat, save_file, list_models
+            chat_stream, cancel_chat, save_file, list_models, tavily_search, tavily_extract
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
