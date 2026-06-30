@@ -18,6 +18,7 @@ struct ToolDef {
 }
 
 #[derive(Debug, Default, Clone)]
+#[allow(dead_code)]
 struct ToolAccum {
     index: usize,
     id: String,
