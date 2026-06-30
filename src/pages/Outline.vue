@@ -70,7 +70,12 @@ async function load() {
     !(genState.running && genState.projectId === projectId)
   ) {
     if (project.value) {
-      startOutline(projectId, project.value.topic, project.value.style ?? null);
+      startOutline(
+        projectId,
+        project.value.topic,
+        project.value.style ?? null,
+        !!project.value.search_enabled
+      );
     }
   }
 }
@@ -114,13 +119,19 @@ function goEditor() {
     </div>
     <div class="o-body">
       <section class="o-main">
+        <details v-if="project.manuscript" class="manuscript-block" open>
+          <summary>完整文案（{{ project.manuscript.length }} 字）</summary>
+          <pre>{{ project.manuscript }}</pre>
+        </details>
         <div v-if="isRunning && !outlineView.length" class="stream">
           <div v-if="genState.reasoning" class="block">
-            <span class="label">思考</span>
+            <span class="label">思考 / 调研</span>
             <pre ref="reasoningEl">{{ genState.reasoning }}</pre>
           </div>
           <div class="block">
-            <span class="label">正文（JSON 流式）</span>
+            <span class="label">
+              {{ genState.phase === 'manuscript' ? '文案（生成中）' : '正文（JSON 流式）' }}
+            </span>
             <pre>{{ genState.content }}</pre>
           </div>
         </div>
@@ -234,5 +245,25 @@ function goEditor() {
   background: #e03131;
   color: #fff;
   border-color: #e03131;
+}
+.manuscript-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  margin-bottom: 12px;
+}
+.manuscript-block summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+.manuscript-block pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  margin: 8px 0 0;
+  max-height: 320px;
+  overflow: auto;
 }
 </style>
