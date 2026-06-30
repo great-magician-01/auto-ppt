@@ -408,6 +408,12 @@ pub fn run() {
             sql: include_str!("../migrations/005_add_reasoning_to_messages.sql"),
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 6,
+            description: "add manuscript and search_enabled to projects",
+            sql: include_str!("../migrations/006_add_manuscript_and_search.sql"),
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

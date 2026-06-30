@@ -16,6 +16,8 @@ export interface Project {
   style?: string | null;
   design_tokens?: string | null;
   theme_css?: string | null;
+  manuscript?: string | null;
+  search_enabled?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -59,19 +61,20 @@ export async function getProject(id: number): Promise<Project | null> {
 export async function createProject(
   title: string,
   topic: string,
-  style?: string | null
+  style?: string | null,
+  searchEnabled?: boolean
 ): Promise<number> {
   const d = await db();
   const r = await d.execute(
-    "INSERT INTO projects(title, topic, style) VALUES(?, ?, ?)",
-    [title, topic, style ?? null]
+    "INSERT INTO projects(title, topic, style, search_enabled) VALUES(?, ?, ?, ?)",
+    [title, topic, style ?? null, searchEnabled ? 1 : 0]
   );
   return Number(r.lastInsertId);
 }
 
 export async function updateProject(
   id: number,
-  fields: Partial<Pick<Project, "title" | "design_tokens" | "theme_css" | "style">>
+  fields: Partial<Pick<Project, "title" | "design_tokens" | "theme_css" | "style" | "manuscript" | "search_enabled">>
 ) {
   const d = await db();
   const sets: string[] = [];
