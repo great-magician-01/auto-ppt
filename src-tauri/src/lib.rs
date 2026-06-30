@@ -4,11 +4,37 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct ToolCall {
+    id: String,
+    name: String,
+    arguments: String, // JSON 字符串
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ToolDef {
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
+}
+
+#[derive(Debug, Default, Clone)]
+struct ToolAccum {
+    index: usize,
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ChatMessage {
     role: String,
     content: String,
     #[serde(default)]
     images: Vec<String>, // dataURL: "data:image/png;base64,..."
+    #[serde(default)]
+    tool_calls: Vec<ToolCall>,
+    #[serde(default)]
+    tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,6 +50,8 @@ struct ChatConfig {
     thinking_effort: String,
     #[serde(default)]
     json_mode: bool,
+    #[serde(default)]
+    tools: Vec<ToolDef>,
 }
 
 type AbortSlot = Mutex<Option<futures_util::future::AbortHandle>>;
@@ -41,12 +69,37 @@ fn split_data_url(s: &str) -> (String, String) {
     ("image/png".to_string(), s.to_string())
 }
 
-/// OpenAI 消息数组：含图片时 content 组装成 text+image_url 数组
+/// OpenAI 消息数组：含图片时 content 组装成 text+image_url 数组；tool_calls / tool 结果按角色翻译
 fn openai_messages(messages: &[ChatMessage]) -> serde_json::Value {
     serde_json::Value::Array(
         messages
             .iter()
             .map(|m| {
+                if m.role == "tool" {
+                    return serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": m.tool_call_id.clone().unwrap_or_default(),
+                        "content": m.content,
+                    });
+                }
+                if !m.tool_calls.is_empty() {
+                    let calls: Vec<serde_json::Value> = m
+                        .tool_calls
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "id": c.id,
+                                "type": "function",
+                                "function": { "name": c.name, "arguments": c.arguments },
+                            })
+                        })
+                        .collect();
+                    return serde_json::json!({
+                        "role": m.role,
+                        "content": if m.content.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(m.content.clone()) },
+                        "tool_calls": calls,
+                    });
+                }
                 if m.images.is_empty() {
                     serde_json::json!({ "role": m.role, "content": m.content })
                 } else {
@@ -61,7 +114,8 @@ fn openai_messages(messages: &[ChatMessage]) -> serde_json::Value {
     )
 }
 
-/// Anthropic：system 提到顶层字符串；非 system 进 messages（assistant/user），含图片时为 text+image 块数组
+/// Anthropic：system 提到顶层字符串；非 system 进 messages。
+/// assistant tool_use → content 块数组；role:"tool" → 作为 user 的 tool_result 块（紧随对应 tool_use）。
 fn anthropic_split(messages: &[ChatMessage]) -> (String, Vec<serde_json::Value>) {
     let mut system_parts: Vec<String> = Vec::new();
     let mut rest: Vec<serde_json::Value> = Vec::new();
@@ -70,7 +124,37 @@ fn anthropic_split(messages: &[ChatMessage]) -> (String, Vec<serde_json::Value>)
             system_parts.push(m.content.clone());
             continue;
         }
+        if m.role == "tool" {
+            // 工具结果：Anthropic 要求作为 user 消息的 tool_result 块
+            rest.push(serde_json::json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id.clone().unwrap_or_default(),
+                    "content": m.content,
+                }],
+            }));
+            continue;
+        }
         let role = if m.role == "assistant" { "assistant" } else { "user" };
+        if !m.tool_calls.is_empty() {
+            let mut blocks: Vec<serde_json::Value> = Vec::new();
+            if !m.content.is_empty() {
+                blocks.push(serde_json::json!({ "type": "text", "text": m.content }));
+            }
+            for c in &m.tool_calls {
+                let input: serde_json::Value =
+                    serde_json::from_str(&c.arguments).unwrap_or(serde_json::json!({}));
+                blocks.push(serde_json::json!({
+                    "type": "tool_use",
+                    "id": c.id,
+                    "name": c.name,
+                    "input": input,
+                }));
+            }
+            rest.push(serde_json::json!({ "role": role, "content": blocks }));
+            continue;
+        }
         if m.images.is_empty() {
             rest.push(serde_json::json!({ "role": role, "content": m.content }));
         } else {
@@ -88,8 +172,15 @@ fn anthropic_split(messages: &[ChatMessage]) -> (String, Vec<serde_json::Value>)
     (system_parts.join("\n\n"), rest)
 }
 
-/// 解析单条 Anthropic SSE data（按事件类型分发 chunk/reasoning/done）
-fn emit_anthropic_event(app: &AppHandle, event: &str, data: &str) {
+/// 解析单条 Anthropic SSE：text/thinking → 事件；tool_use 起止累积到 tool_acc。
+/// last_tool_slot 指向"最近一次 content_block_start(tool_use) 创建的累积槽"，input_json_delta 追加到它。
+fn emit_anthropic_event(
+    app: &AppHandle,
+    event: &str,
+    data: &str,
+    tool_acc: &std::sync::Arc<std::sync::Mutex<Vec<ToolAccum>>>,
+    last_tool_slot: &mut i64,
+) {
     if data == "[DONE]" {
         return;
     }
@@ -97,32 +188,78 @@ fn emit_anthropic_event(app: &AppHandle, event: &str, data: &str) {
         return;
     };
     match event {
-        "content_block_delta" => {
-            let delta = &v["delta"];
-            if let Some(t) = delta["type"].as_str() {
-                match t {
-                    "text_delta" => {
-                        if let Some(text) = delta["text"].as_str() {
-                            if !text.is_empty() {
-                                let _ = app.emit("chat-chunk", text);
-                            }
-                        }
-                    }
-                    "thinking_delta" => {
-                        if let Some(th) = delta["thinking"].as_str() {
-                            if !th.is_empty() {
-                                let _ = app.emit("chat-reasoning", th);
-                            }
-                        }
-                    }
-                    _ => {}
+        "content_block_start" => {
+            let b = &v["content_block"];
+            if b["type"].as_str() == Some("tool_use") {
+                if let Ok(mut acc) = tool_acc.lock() {
+                    let new_idx = acc.len();
+                    acc.push(ToolAccum {
+                        index: new_idx,
+                        id: b["id"].as_str().unwrap_or("").to_string(),
+                        name: b["name"].as_str().unwrap_or("").to_string(),
+                        arguments: String::new(),
+                    });
+                    *last_tool_slot = (acc.len() as i64) - 1;
                 }
             }
+            // text/thinking 块不占累积槽，last_tool_slot 不变
+        }
+        "content_block_delta" => {
+            let delta = &v["delta"];
+            match delta["type"].as_str() {
+                Some("text_delta") => {
+                    if let Some(text) = delta["text"].as_str() {
+                        if !text.is_empty() {
+                            let _ = app.emit("chat-chunk", text);
+                        }
+                    }
+                }
+                Some("thinking_delta") => {
+                    if let Some(th) = delta["thinking"].as_str() {
+                        if !th.is_empty() {
+                            let _ = app.emit("chat-reasoning", th);
+                        }
+                    }
+                }
+                Some("input_json_delta") => {
+                    if let Some(pj) = delta["partial_json"].as_str() {
+                        if let Ok(mut acc) = tool_acc.lock() {
+                            let i = *last_tool_slot as usize;
+                            if i < acc.len() {
+                                acc[i].arguments.push_str(pj);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        "content_block_stop" => {
+            // 不动 last_tool_slot：下个 tool_use 的 start 会覆盖它；text 块 stop 也无害
         }
         "message_stop" => {
             let _ = app.emit("chat-done", ());
         }
         _ => {}
+    }
+}
+
+/// 回合结束：若有累积的 tool_call，发 chat-tool-calls 事件（payload Vec<ToolCall>）。
+fn emit_tool_calls(app: &AppHandle, tool_acc: &std::sync::Arc<std::sync::Mutex<Vec<ToolAccum>>>) {
+    let calls: Vec<ToolCall> = if let Ok(acc) = tool_acc.lock() {
+        acc.iter()
+            .filter(|a| !a.name.is_empty())
+            .map(|a| ToolCall {
+                id: a.id.clone(),
+                name: a.name.clone(),
+                arguments: a.arguments.clone(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if !calls.is_empty() {
+        let _ = app.emit("chat-tool-calls", calls);
     }
 }
 
@@ -166,6 +303,19 @@ async fn chat_stream(
                 obj.insert("max_tokens".to_string(), serde_json::Value::Number(max_tokens.into()));
             }
         }
+        // 工具：Anthropic tools → [{name, description, input_schema}]
+        if !config.tools.is_empty() {
+            let tools: Vec<serde_json::Value> = config.tools.iter().map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.parameters,
+                })
+            }).collect();
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("tools".to_string(), serde_json::Value::Array(tools));
+            }
+        }
         // Anthropic 无 response_format json_object；忽略 json_mode，靠提示词约束
         client
             .post(&url)
@@ -189,6 +339,23 @@ async fn chat_stream(
                         serde_json::Value::String(config.thinking_effort.clone()),
                     );
                 }
+            }
+        }
+        // 工具：OpenAI tools → [{type:function, function:{name,description,parameters}}] + tool_choice:auto
+        if !config.tools.is_empty() {
+            let tools: Vec<serde_json::Value> = config.tools.iter().map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    }
+                })
+            }).collect();
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("tools".to_string(), serde_json::Value::Array(tools));
+                obj.insert("tool_choice".to_string(), serde_json::json!("auto"));
             }
         }
         if config.json_mode {
@@ -219,14 +386,20 @@ async fn chat_stream(
     }
     let app2 = app.clone();
 
+    // tool_call 累积缓冲：OpenAI 按 delta.tool_calls[].index 对齐；Anthropic 按 content_block_start(tool_use) 顺序追加
+    let tool_acc: std::sync::Arc<std::sync::Mutex<Vec<ToolAccum>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tool_acc2 = tool_acc.clone();
+
     let streaming = async move {
         let mut stream = resp.bytes_stream();
         let mut buf = String::new();
 
         if is_anthropic {
-            // Anthropic SSE：跟踪 event，遇空行处理 data
+            // Anthropic SSE：跟踪 event，遇空行处理 data；累积 tool_use 块
             let mut cur_event = String::new();
             let mut data_buf = String::new();
+            let mut last_tool_slot: i64 = -1;
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(|e| format!("读取流失败: {e}"))?;
                 buf.push_str(&String::from_utf8_lossy(&chunk));
@@ -238,7 +411,7 @@ async fn chat_stream(
                     buf = buf[idx + 1..].to_string();
                     if line.is_empty() {
                         if !data_buf.is_empty() {
-                            emit_anthropic_event(&app2, &cur_event, &data_buf);
+                            emit_anthropic_event(&app2, &cur_event, &data_buf, &tool_acc2, &mut last_tool_slot);
                         }
                         cur_event.clear();
                         data_buf.clear();
@@ -255,10 +428,11 @@ async fn chat_stream(
                 }
             }
             if !data_buf.is_empty() {
-                emit_anthropic_event(&app2, &cur_event, &data_buf);
+                emit_anthropic_event(&app2, &cur_event, &data_buf, &tool_acc2, &mut last_tool_slot);
             }
+            emit_tool_calls(&app2, &tool_acc2);
         } else {
-            // OpenAI SSE：原逻辑
+            // OpenAI SSE：解析 delta.content/reasoning_content/tool_calls
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(|e| format!("读取流失败: {e}"))?;
                 buf.push_str(&String::from_utf8_lossy(&chunk));
@@ -273,6 +447,7 @@ async fn chat_stream(
                     }
                     let data = line[5..].trim();
                     if data == "[DONE]" {
+                        emit_tool_calls(&app2, &tool_acc2);
                         let _ = app2.emit("chat-done", ());
                         return Ok(());
                     }
@@ -288,9 +463,32 @@ async fn chat_stream(
                                 let _ = app2.emit("chat-reasoning", reasoning);
                             }
                         }
+                        // tool_calls 增量：按 index 累积 id/name/arguments
+                        if let Some(calls) = delta["tool_calls"].as_array() {
+                            if let Ok(mut acc) = tool_acc2.lock() {
+                                for c in calls {
+                                    let idx = c["index"].as_u64().unwrap_or(0) as usize;
+                                    while acc.len() <= idx {
+                                        let new_idx = acc.len();
+                                        acc.push(ToolAccum { index: new_idx, ..Default::default() });
+                                    }
+                                    let slot = &mut acc[idx];
+                                    if let Some(id) = c["id"].as_str() {
+                                        slot.id = id.to_string();
+                                    }
+                                    if let Some(name) = c["function"]["name"].as_str() {
+                                        slot.name = name.to_string();
+                                    }
+                                    if let Some(args) = c["function"]["arguments"].as_str() {
+                                        slot.arguments.push_str(args);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
+            emit_tool_calls(&app2, &tool_acc2);
         }
         let _ = app2.emit("chat-done", ());
         Ok::<(), String>(())
