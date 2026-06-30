@@ -90,7 +90,8 @@ async function onSend(text: string) {
     project.value.topic,
     project.value.style ?? null,
     currentSlides,
-    text
+    text,
+    project.value.manuscript
   );
   // 完成后重载
   slides.value = await listSlides(projectId);

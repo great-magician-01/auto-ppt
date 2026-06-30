@@ -120,6 +120,7 @@ export async function chatOnce(
  * - 每轮开始调 onRoundStart（调用方在此清空 genState.content，避免中间文本污染最终文案）。
  * - chatAgent 内部也累加 finalText 用于 return，同时通过 onChunk 把最终轮 token 推给 UI 实时显示。
  * - 调用上限：默认 LLM ≤50 轮、工具 ≤20 次，触顶追加 system 指令强制收尾。
+ * - isCancelled：调用方传入取消检查回调，轮间/工具执行后检测到取消即中断（避免取消失效继续消耗额度）。
  */
 export async function chatAgent(
   initMessages: ChatMsg[],
@@ -131,12 +132,14 @@ export async function chatAgent(
   limits: { maxLlmRounds: number; maxToolCalls: number } = {
     maxLlmRounds: 50,
     maxToolCalls: 20,
-  }
+  },
+  isCancelled?: () => boolean
 ): Promise<string> {
   const messages: ChatMsg[] = [...initMessages];
   let toolCount = 0;
   let finalText = "";
   for (let round = 0; round < limits.maxLlmRounds; round++) {
+    if (isCancelled?.()) return finalText;
     onRoundStart?.(); // 调用方清空 genState.content
     finalText = "";
     const { toolCalls } = await chat(
@@ -152,25 +155,37 @@ export async function chatAgent(
     if (!toolCalls || !toolCalls.length) {
       return finalText; // 无工具调用 = 最终回复
     }
-    // assistant 工具调用消息回填
-    messages.push({ role: "assistant", content: finalText, tool_calls: toolCalls });
+    // 只执行剩余配额内的工具调用，助手消息仅回填已执行的 calls
+    // （API 要求每个 tool_call_id 都必须有对应 tool 结果，否则 400）
     const remaining = limits.maxToolCalls - toolCount;
     const callsToExec = toolCalls.slice(0, Math.max(0, remaining));
+    const dropped = toolCalls.length - callsToExec.length;
+    const assistantMsg: ChatMsg = { role: "assistant", content: finalText };
+    if (callsToExec.length > 0) {
+      assistantMsg.tool_calls = callsToExec;
+    }
+    messages.push(assistantMsg);
     for (const call of callsToExec) {
+      if (isCancelled?.()) return finalText;
       const result = await execTool(call);
       messages.push({ role: "tool", content: result, tool_call_id: call.id });
       toolCount++;
     }
-    // 超过工具上限：强制收尾
+    // 工具执行后再次检查取消（工具 HTTP 调用不可中止，取消后不应进入下一轮）
+    if (isCancelled?.()) return finalText;
+    // 达到/超过工具上限：追加 system 指令强制收尾
     if (toolCount >= limits.maxToolCalls) {
-      messages.push({
-        role: "system",
-        content:
-          "已达到工具调用上限，请停止调用工具，直接基于已有信息产出最终文案。",
-      });
+      let msg =
+        "已达到工具调用上限，请停止调用工具，直接基于已有信息产出最终文案。";
+      if (dropped > 0) {
+        const names = toolCalls.slice(callsToExec.length).map((c) => c.name).join("、");
+        msg += ` 本轮有 ${dropped} 个调用因配额不足被跳过：${names}`;
+      }
+      messages.push({ role: "system", content: msg });
     }
   }
   // 触顶 LLM 轮数：最后一轮强制无工具请求
+  if (isCancelled?.()) return finalText;
   onRoundStart?.();
   finalText = "";
   await chat(

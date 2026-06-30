@@ -577,7 +577,12 @@ async fn tavily_search(
     if let Some(arr) = v["results"].as_array() {
         for r in arr {
             let content = r["content"].as_str().unwrap_or("").to_string();
-            let content = if content.len() > 1500 { content[..1500].to_string() } else { content };
+            let content = if content.len() > 1500 {
+                // 按字符边界安全截断（直接 byte index 切片会 panic 在多字节 UTF-8 字符中间）
+                content.chars().take(1500).collect::<String>()
+            } else {
+                content
+            };
             results.push(TavilySearchItem {
                 title: r["title"].as_str().unwrap_or("").to_string(),
                 url: r["url"].as_str().unwrap_or("").to_string(),
@@ -635,7 +640,12 @@ async fn tavily_extract(
     if let Some(arr) = v["results"].as_array() {
         for r in arr {
             let raw = r["raw_content"].as_str().unwrap_or("").to_string();
-            let raw = if raw.len() > 4000 { raw[..4000].to_string() } else { raw };
+            let raw = if raw.len() > 4000 {
+                // 按字符边界安全截断
+                raw.chars().take(4000).collect::<String>()
+            } else {
+                raw
+            };
             results.push(TavilyExtractItem {
                 url: r["url"].as_str().unwrap_or("").to_string(),
                 raw_content: raw,

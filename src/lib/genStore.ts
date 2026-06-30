@@ -131,6 +131,13 @@ export async function startOutline(
   let manuscript = "";
   try {
     // —— 文案阶段 ——
+    // 若项目已有完整文案（如上次拆页失败/取消但文案已存），跳过调研直接复用
+    const proj = await getProject(projectId);
+    if (proj?.manuscript) {
+      manuscript = proj.manuscript;
+      genState.status = "已有完整文案（" + manuscript.length + " 字），跳过调研直接拆分大纲…";
+      genState.content = manuscript; // 让 UI 可见
+    } else {
     let useSearch = searchEnabled;
     let apiKey: string | null = null;
     if (useSearch) {
@@ -161,7 +168,9 @@ export async function startOutline(
           () => {
             // 每轮开始清空 content（只留最终轮文案）
             genState.content = "";
-          }
+          },
+          undefined, // limits (default)
+          () => genState.cancelled
         );
       } catch (e) {
         if (isCancelled(e)) throw e;
@@ -209,6 +218,7 @@ export async function startOutline(
       null,
       genState.reasoning
     );
+    } // 结束 if (proj?.manuscript) else 分支
 
     // —— 拆页阶段 ——
     if (genState.cancelled) {
@@ -300,7 +310,8 @@ export async function sendOutlineChat(
   topic: string,
   style: string | null,
   currentSlides: OutlineSlide[],
-  instruction: string
+  instruction: string,
+  manuscript?: string | null
 ): Promise<void> {
   genState.projectId = projectId;
   genState.running = true;
@@ -311,12 +322,12 @@ export async function sendOutlineChat(
       {
         role: "system",
         content:
-          "你是专业 PPT 设计师。根据用户指令修改给定的大纲 JSON，只返回修改后的完整 JSON 对象（结构同生成阶段：design_tokens/theme_css/slides[/style]），不要 markdown 代码块、不要任何解释文字。",
+          "你是专业 PPT 设计师。根据用户指令修改给定的大纲 JSON，只返回修改后的完整 JSON 对象（结构同生成阶段：design_tokens/theme_css/slides[/style]），不要 markdown 代码块、不要任何解释文字。每页必须保留 notes 字段（讲稿片段），不可省略或清空；修改页面的同时维护 notes 与对应要点对齐。",
       },
       {
         role: "user",
         content:
-          `主题：${topic}\n\n当前大纲 JSON：\n${JSON.stringify(
+          `主题：${topic}${manuscript ? `\n\n【完整文案（供参考，修改大纲时确保覆盖文案要点）】\n${manuscript}` : ""}\n\n当前大纲 JSON：\n${JSON.stringify(
             { slides: currentSlides },
             null,
             2
