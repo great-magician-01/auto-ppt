@@ -173,7 +173,9 @@ export async function chatAgent(
     }
     // 工具执行后再次检查取消（工具 HTTP 调用不可中止，取消后不应进入下一轮）
     if (isCancelled?.()) return finalText;
-    // 达到/超过工具上限：追加 system 指令强制收尾
+    // 达到/超过工具上限：追加 system 指令强制收尾，并跳出循环走末尾的无工具请求
+    // （不能继续传 tools 跑剩余轮数：模型若不服从仍会发 tool_calls，callsToExec 为空，
+    //  既不执行也不增加 toolCount，循环会空转到 maxLlmRounds，白费大量调用）
     if (toolCount >= limits.maxToolCalls) {
       let msg =
         "已达到工具调用上限，请停止调用工具，直接基于已有信息产出最终文案。";
@@ -182,6 +184,7 @@ export async function chatAgent(
         msg += ` 本轮有 ${dropped} 个调用因配额不足被跳过：${names}`;
       }
       messages.push({ role: "system", content: msg });
+      break;
     }
   }
   // 触顶 LLM 轮数：最后一轮强制无工具请求

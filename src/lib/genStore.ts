@@ -210,6 +210,11 @@ export async function startOutline(
       return;
     }
     manuscript = manuscript || genState.content;
+    if (!manuscript.trim()) {
+      // 模型最终轮只产出工具调用而无文本，或返回空：文案先行流程无内容可拆页，直接报错
+      // （不写空 manuscript、不进入拆页阶段，避免凭主题凭空生成空洞大纲）
+      throw new Error("文案生成失败：模型未产出任何文案内容，请重试或调整主题。");
+    }
     await updateProject(projectId, { manuscript });
     await addMessage(
       projectId,

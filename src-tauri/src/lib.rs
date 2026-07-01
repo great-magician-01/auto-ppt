@@ -116,27 +116,39 @@ fn openai_messages(messages: &[ChatMessage]) -> serde_json::Value {
 }
 
 /// Anthropic：system 提到顶层字符串；非 system 进 messages。
-/// assistant tool_use → content 块数组；role:"tool" → 作为 user 的 tool_result 块（紧随对应 tool_use）。
+/// assistant tool_use → content 块数组；role:"tool" → 作为 user 的 tool_result 块。
+/// 连续多条 tool 结果合并进同一条 user 消息（多个 tool_result 块），
+/// 否则会得到连续的 user 消息，违反 Anthropic「user/assistant 必须交替」要求而 400。
 fn anthropic_split(messages: &[ChatMessage]) -> (String, Vec<serde_json::Value>) {
     let mut system_parts: Vec<String> = Vec::new();
     let mut rest: Vec<serde_json::Value> = Vec::new();
+    // 待合并的连续 tool 结果块；遇非 tool 消息时 flush 成一条 user 消息
+    let mut pending_tool_results: Vec<serde_json::Value> = Vec::new();
+    let flush_tool_results =
+        |pending: &mut Vec<serde_json::Value>, rest: &mut Vec<serde_json::Value>| {
+            if !pending.is_empty() {
+                rest.push(serde_json::json!({
+                    "role": "user",
+                    "content": std::mem::take(pending),
+                }));
+            }
+        };
     for m in messages {
         if m.role == "system" {
+            flush_tool_results(&mut pending_tool_results, &mut rest);
             system_parts.push(m.content.clone());
             continue;
         }
         if m.role == "tool" {
-            // 工具结果：Anthropic 要求作为 user 消息的 tool_result 块
-            rest.push(serde_json::json!({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": m.tool_call_id.clone().unwrap_or_default(),
-                    "content": m.content,
-                }],
+            // 工具结果：累积为 user 消息的 tool_result 块，与相邻 tool 结果合并
+            pending_tool_results.push(serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": m.tool_call_id.clone().unwrap_or_default(),
+                "content": m.content,
             }));
             continue;
         }
+        flush_tool_results(&mut pending_tool_results, &mut rest);
         let role = if m.role == "assistant" { "assistant" } else { "user" };
         if !m.tool_calls.is_empty() {
             let mut blocks: Vec<serde_json::Value> = Vec::new();
@@ -170,6 +182,7 @@ fn anthropic_split(messages: &[ChatMessage]) -> (String, Vec<serde_json::Value>)
             rest.push(serde_json::json!({ "role": role, "content": parts }));
         }
     }
+    flush_tool_results(&mut pending_tool_results, &mut rest);
     (system_parts.join("\n\n"), rest)
 }
 
