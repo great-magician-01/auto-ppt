@@ -18,7 +18,15 @@ export interface ToolDef {
   name: string;
   description: string;
   parameters: object; // JSON Schema
+  /** OpenAI strict 模式（强 Schema 校验）；Anthropic 忽略（input_schema 原生强校验） */
+  strict?: boolean;
 }
+
+/** 中性工具选择策略，由 Rust 按格式翻译。 */
+export type ToolChoice =
+  | { type: "auto" }
+  | { type: "required" }
+  | { type: "tool"; name: string };
 
 export interface ToolCall {
   id: string;
@@ -48,7 +56,9 @@ export async function chat(
   jsonMode = false,
   opts?: {
     tools?: ToolDef[];
+    toolChoice?: ToolChoice;
     onToolCalls?: (calls: ToolCall[]) => void;
+    onToolArgs?: (e: { name: string; delta: string }) => void;
   }
 ): Promise<{ toolCalls: ToolCall[] | null }> {
   const ai = await getActiveAi();
@@ -64,7 +74,10 @@ export async function chat(
     thinking_effort: ai.thinking_effort,
     json_mode: jsonMode,
   };
-  if (opts?.tools?.length) config.tools = opts.tools;
+  if (opts?.tools?.length) {
+    config.tools = opts.tools;
+    if (opts.toolChoice) config.tool_choice = opts.toolChoice;
+  }
 
   let collected: ToolCall[] | null = null;
   const onChunkUn = await listen<string>("chat-chunk", (e) => onChunk(e.payload));
@@ -79,6 +92,11 @@ export async function chat(
     : await listen<ToolCall[]>("chat-tool-calls", (e) => {
         collected = e.payload;
       });
+  const onToolArgsUn = opts?.onToolArgs
+    ? await listen<{ name: string; delta: string }>("chat-tool-args", (e) =>
+        opts.onToolArgs!(e.payload)
+      )
+    : null;
   const onStartUn = await listen("chat-start", () =>
     console.log("[chat] 连接已建立，开始接收流")
   );
@@ -97,6 +115,7 @@ export async function chat(
     onChunkUn();
     onReasoningUn?.();
     onToolsUn();
+    onToolArgsUn?.();
     onStartUn();
   }
   return { toolCalls: collected };
@@ -116,11 +135,12 @@ export async function chatOnce(
 }
 
 /**
- * 多轮 agent loop：模型可用工具调研，每轮执行工具并把结果回填，直到无工具调用的最终回复。
- * - 每轮开始调 onRoundStart（调用方在此清空 genState.content，避免中间文本污染最终文案）。
- * - chatAgent 内部也累加 finalText 用于 return，同时通过 onChunk 把最终轮 token 推给 UI 实时显示。
- * - 调用上限：默认 LLM ≤50 轮、工具 ≤20 次，触顶追加 system 指令强制收尾。
- * - isCancelled：调用方传入取消检查回调，轮间/工具执行后检测到取消即中断（避免取消失效继续消耗额度）。
+ * 多轮 agent loop：模型用工具调研/产出，每轮执行工具回填结果。
+ * - commitTool 指定"收尾工具"（如 write_manuscript）：模型调用它即收尾返回。
+ *   纯文本无调用 → 提示并下一轮强制；触顶 → 强制收尾轮；强制后仍不调 → 抛错。
+ *   commitTool 执行不计入 maxToolCalls（它是必需的收尾，非调研）。
+ * - 无 commitTool 时退化为旧行为：首个无工具调用轮即最终回复。
+ * - onToolArgs 透传给 chat，供实时预览提取工具参数。
  */
 export async function chatAgent(
   initMessages: ChatMsg[],
@@ -133,72 +153,88 @@ export async function chatAgent(
     maxLlmRounds: 50,
     maxToolCalls: 20,
   },
-  isCancelled?: () => boolean
+  isCancelled?: () => boolean,
+  commitTool?: string,
+  onToolArgs?: (e: { name: string; delta: string }) => void
 ): Promise<string> {
   const messages: ChatMsg[] = [...initMessages];
   let toolCount = 0;
   let finalText = "";
+  let forceFinalize = false;
   for (let round = 0; round < limits.maxLlmRounds; round++) {
     if (isCancelled?.()) return finalText;
-    onRoundStart?.(); // 调用方清空 genState.content
+    onRoundStart?.();
     finalText = "";
+    const forced = forceFinalize && !!commitTool;
+    const toolChoice: ToolChoice = forced
+      ? { type: "tool", name: commitTool! }
+      : { type: "auto" };
     const { toolCalls } = await chat(
       messages,
-      (d) => {
-        finalText += d;
-        onChunk(d);
-      },
+      (d) => { finalText += d; onChunk(d); },
       onReasoning,
       false,
-      { tools }
+      { tools, toolChoice, onToolArgs }
     );
+    if (isCancelled?.()) return finalText;
     if (!toolCalls || !toolCalls.length) {
-      return finalText; // 无工具调用 = 最终回复
+      if (!commitTool) return finalText; // 旧行为：首个无工具轮即最终回复
+      if (forced) throw new Error(`模型未调用工具 ${commitTool} 提交结果，请重试`);
+      messages.push({ role: "assistant", content: finalText });
+      messages.push({
+        role: "system",
+        content: `请调用 ${commitTool} 工具提交最终结果，不要只输出文本。`,
+      });
+      forceFinalize = true;
+      continue;
     }
-    // 只执行剩余配额内的工具调用，助手消息仅回填已执行的 calls
-    // （API 要求每个 tool_call_id 都必须有对应 tool 结果，否则 400）
-    const remaining = limits.maxToolCalls - toolCount;
-    const callsToExec = toolCalls.slice(0, Math.max(0, remaining));
+    // 选出要执行的调用
+    let callsToExec: ToolCall[];
+    if (forced) {
+      // 强制收尾轮：只执行 commitTool（必需，不受配额限制）
+      callsToExec = toolCalls.filter((c) => c.name === commitTool);
+      if (!callsToExec.length) throw new Error(`模型未调用工具 ${commitTool} 提交结果，请重试`);
+    } else {
+      const remaining = limits.maxToolCalls - toolCount;
+      callsToExec = toolCalls.slice(0, Math.max(0, remaining));
+    }
     const dropped = toolCalls.length - callsToExec.length;
     const assistantMsg: ChatMsg = { role: "assistant", content: finalText };
-    if (callsToExec.length > 0) {
-      assistantMsg.tool_calls = callsToExec;
-    }
+    if (callsToExec.length > 0) assistantMsg.tool_calls = callsToExec;
     messages.push(assistantMsg);
+    const executedNames = new Set<string>();
     for (const call of callsToExec) {
       if (isCancelled?.()) return finalText;
       const result = await execTool(call);
       messages.push({ role: "tool", content: result, tool_call_id: call.id });
-      toolCount++;
+      if (call.name !== commitTool) toolCount++; // commitTool 不占调研配额
+      executedNames.add(call.name);
     }
-    // 工具执行后再次检查取消（工具 HTTP 调用不可中止，取消后不应进入下一轮）
     if (isCancelled?.()) return finalText;
-    // 达到/超过工具上限：追加 system 指令强制收尾，并跳出循环走末尾的无工具请求
-    // （不能继续传 tools 跑剩余轮数：模型若不服从仍会发 tool_calls，callsToExec 为空，
-    //  既不执行也不增加 toolCount，循环会空转到 maxLlmRounds，白费大量调用）
-    if (toolCount >= limits.maxToolCalls) {
-      let msg =
-        "已达到工具调用上限，请停止调用工具，直接基于已有信息产出最终文案。";
+    if (commitTool && executedNames.has(commitTool)) return finalText; // 收尾工具已执行
+    // 未收尾：配额耗尽则下轮强制
+    if (!forced && toolCount >= limits.maxToolCalls) {
+      let msg = "已达到工具调用上限，请停止调研，直接调用工具提交最终结果。";
       if (dropped > 0) {
         const names = toolCalls.slice(callsToExec.length).map((c) => c.name).join("、");
         msg += ` 本轮有 ${dropped} 个调用因配额不足被跳过：${names}`;
       }
       messages.push({ role: "system", content: msg });
-      break;
+      forceFinalize = true;
     }
   }
-  // 触顶 LLM 轮数：最后一轮强制无工具请求
+  // 触顶 LLM 轮数：最后强制一次收尾
   if (isCancelled?.()) return finalText;
-  onRoundStart?.();
-  finalText = "";
-  await chat(
-    messages,
-    (d) => {
-      finalText += d;
-      onChunk(d);
-    },
-    onReasoning,
-    false
-  );
+  if (commitTool) {
+    onRoundStart?.();
+    finalText = "";
+    await chat(
+      messages,
+      (d) => { finalText += d; onChunk(d); },
+      onReasoning,
+      false,
+      { tools, toolChoice: { type: "tool", name: commitTool }, onToolArgs }
+    );
+  }
   return finalText;
 }
