@@ -83,7 +83,7 @@ ${themeCss}
 - 要点：${JSON.stringify(slide.bullets)}
 
 【视觉与排版要求（精美 PPT 标准）】
-1. 输出完整 HTML 文档：<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><style>…</style></head><body><div class="slide">…</div></body></html>。<style> 中先原样粘贴上面的 theme.css，再追加本页专属样式。
+1. html 参数为完整 HTML 文档：<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><style>…</style></head><body><div class="slide">…</div></body></html>。<style> 中先原样粘贴上面的 theme.css，再追加本页专属样式。
 2. 画布 .slide 固定 ${SLIDE_W}×${SLIDE_H}（16:9），overflow:hidden，box-sizing:border-box，内边距 padding 不少于 64px。
 3. 字号必须适合投影可读：页面标题 64–96px，要点/正文 32–44px，辅助说明 24–28px。若 theme.css 里的 title-size/body-size 偏小，在本页样式中覆盖放大字号（仅放大字号，绝不改颜色、字体、背景）。
 4. 内容必须充实饱满，禁止大面积空白：把每个要点展开为 1–3 句具体说明、数据、案例或子要点；信息量大时用两栏/三栏/分区网格布局排布，而不是稀疏罗列三五条短句让页面空旷。封面/致谢/section 可适度留白但仍要有视觉主体。
@@ -98,7 +98,7 @@ ${themeCss}
    - 控制行高防止垂直溢出：正文 line-height 不超过 1.4，标题 line-height 不超过 1.2
    - 本页追加的样式中必须包含 'body { margin: 0; padding: 0; }'
 9. 全部样式内联在 <style> 中，不引用任何外部图片/字体/资源（不得使用 @import 或 Google Fonts 链接，字体用系统字体或 theme.css 已定义的字体族）。
-10. 只输出 HTML 本身，不要 markdown 代码块、不要任何解释。`;
+10. 通过调用 write_slide_html 工具提交完整 HTML（html 参数），不要把 HTML 直接输出为回复正文。先用一句话说明本页设计思路，再调用工具。`;
 }
 
 /**
@@ -158,11 +158,12 @@ export function cleanHtml(raw: string): string {
 /**
  * 自检提示词：仅修正溢出/排版/对齐问题，严禁改动主题样式。
  * 多模态（multimodal=true）对照渲染截图与 HTML；非多模态仅依据 HTML/CSS 推断（未附图）。
+ * 改写结果通过 apply_selfcheck 工具提交。
  */
 export function selfCheckPrompt(html: string, multimodal = true): string {
   const intro = multimodal
-    ? `对照附图（当前页面渲染截图）与下方当前 HTML，检查是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”。若有，仅做最小幅度修正；若无，原样返回该 HTML。`
-    : `仔细审阅下方当前页 HTML，依据其 CSS 与结构推断是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”（未附渲染截图，需从样式值判断）。若有，仅做最小幅度修正；若无，原样返回该 HTML。`;
+    ? `对照附图（当前页面渲染截图）与下方当前 HTML，检查是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”。若有，仅做最小幅度修正；若无，原样提交该 HTML。`
+    : `仔细审阅下方当前页 HTML，依据其 CSS 与结构推断是否存在内容溢出 ${SLIDE_W}×${SLIDE_H} 画布、元素错位、对齐混乱、字号过小看不清等“硬伤”（未附渲染截图，需从样式值判断）。若有，仅做最小幅度修正；若无，原样提交该 HTML。`;
   return `你是 PPT 视觉自检员。${intro}
 
 当前 HTML：
@@ -181,7 +182,7 @@ ${html}
    f) 极端情况下可对过长文本使用 '-webkit-line-clamp' 或多行截断，但优先保留完整信息
 5. 不得新增或删除任何 class、不得改写标签结构，只修样式值。
 
-【输出】只输出完整 HTML 文档（<!DOCTYPE html>…</html>），不要 markdown 代码块、不要解释。若页面无明显硬伤，必须原样返回上面那段 HTML（一字不改）。`;
+【提交】调用 apply_selfcheck 工具提交完整 HTML 文档（html 参数）。若页面无明显硬伤，必须原样提交上面那段 HTML（一字不改）。`;
 }
 
 
