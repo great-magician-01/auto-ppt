@@ -774,6 +774,12 @@ pub fn run() {
             sql: include_str!("../migrations/006_add_manuscript_and_search.sql"),
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 7,
+            description: "add tool_call to messages for tool-call card",
+            sql: include_str!("../migrations/007_add_tool_call_to_messages.sql"),
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

@@ -43,6 +43,8 @@ export interface Message {
   content: string;
   /** 思考过程（仅助手完成消息可能附带，由生成/对话结束时回填） */
   reasoning?: string | null;
+  /** 工具调用卡片摘要 JSON {name,label}；仅助手消息，工具调用产物阶段回填 */
+  tool_call?: string | null;
   created_at?: string;
 }
 
@@ -159,12 +161,13 @@ export async function addMessage(
   role: ChatRole,
   content: string,
   slideId?: number | null,
-  reasoning?: string | null
+  reasoning?: string | null,
+  toolCall?: string | null
 ) {
   const d = await db();
   await d.execute(
-    "INSERT INTO messages(project_id, slide_id, role, content, reasoning) VALUES(?, ?, ?, ?, ?)",
-    [projectId, slideId ?? null, role, content, reasoning ?? null]
+    "INSERT INTO messages(project_id, slide_id, role, content, reasoning, tool_call) VALUES(?, ?, ?, ?, ?, ?)",
+    [projectId, slideId ?? null, role, content, reasoning ?? null, toolCall ?? null]
   );
 }
 
