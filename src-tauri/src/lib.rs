@@ -15,6 +15,8 @@ struct ToolDef {
     name: String,
     description: String,
     parameters: serde_json::Value,
+    #[serde(default)]
+    strict: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -38,6 +40,15 @@ struct ChatMessage {
     tool_call_id: Option<String>,
 }
 
+/// 中性工具选择策略，Rust 按格式翻译为 OpenAI/Anthropic 各自的 tool_choice。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum ToolChoice {
+    Auto,
+    Required,
+    Tool { name: String },
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ChatConfig {
     api_base: String,
@@ -53,6 +64,8 @@ struct ChatConfig {
     json_mode: bool,
     #[serde(default)]
     tools: Vec<ToolDef>,
+    #[serde(default)]
+    tool_choice: Option<ToolChoice>,
 }
 
 type AbortSlot = Mutex<Option<futures_util::future::AbortHandle>>;
@@ -329,6 +342,16 @@ async fn chat_stream(
             if let Some(obj) = body.as_object_mut() {
                 obj.insert("tools".to_string(), serde_json::Value::Array(tools));
             }
+            if let Some(tc) = &config.tool_choice {
+                let v = match tc {
+                    ToolChoice::Auto => serde_json::json!({"type":"auto"}),
+                    ToolChoice::Required => serde_json::json!({"type":"any"}),
+                    ToolChoice::Tool { name } => serde_json::json!({"type":"tool","name":name}),
+                };
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert("tool_choice".to_string(), v);
+                }
+            }
         }
         // Anthropic 无 response_format json_object；忽略 json_mode，靠提示词约束
         client
@@ -355,21 +378,28 @@ async fn chat_stream(
                 }
             }
         }
-        // 工具：OpenAI tools → [{type:function, function:{name,description,parameters}}] + tool_choice:auto
+        // 工具：OpenAI tools → [{type:function, function:{name,description,parameters,strict?}}] + tool_choice 翻译
         if !config.tools.is_empty() {
             let tools: Vec<serde_json::Value> = config.tools.iter().map(|t| {
-                serde_json::json!({
-                    "type": "function",
-                    "function": {
-                        "name": t.name,
-                        "description": t.description,
-                        "parameters": t.parameters,
-                    }
-                })
+                let mut func_obj = serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                });
+                if t.strict.unwrap_or(false) {
+                    func_obj["strict"] = serde_json::json!(true);
+                }
+                serde_json::json!({ "type": "function", "function": func_obj })
             }).collect();
             if let Some(obj) = body.as_object_mut() {
                 obj.insert("tools".to_string(), serde_json::Value::Array(tools));
-                obj.insert("tool_choice".to_string(), serde_json::json!("auto"));
+                let tc = match &config.tool_choice {
+                    Some(ToolChoice::Auto) => serde_json::json!("auto"),
+                    Some(ToolChoice::Required) => serde_json::json!("required"),
+                    Some(ToolChoice::Tool { name }) => serde_json::json!({"type":"function","function":{"name":name}}),
+                    None => serde_json::json!("auto"),
+                };
+                obj.insert("tool_choice".to_string(), tc);
             }
         }
         if config.json_mode {
