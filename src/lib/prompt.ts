@@ -253,4 +253,95 @@ ${args.elementHtml}
 用户修改指令：${args.instruction}`;
 }
 
+// ---- 工具定义（strict 模式：additionalProperties:false + 全字段 required）----
 
+export const manuscriptTool: ToolDef = {
+  name: "write_manuscript",
+  description:
+    "提交撰写完成的完整 PPT 演讲文案（markdown）。文案撰写完毕后必须调用此工具提交，不要把文案直接输出为回复正文。",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      content: { type: "string", description: "完整的 markdown 演讲文案，按 ## 二级标题分页" },
+    },
+    required: ["content"],
+  },
+};
+
+export const outlineTool: ToolDef = {
+  name: "commit_outline",
+  description:
+    "提交 PPT 设计系统与全部页面大纲。设计好配色/字体/版式并拆分完页面后必须调用此工具提交，不要把 JSON 直接输出为回复正文。",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      design_tokens: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          primary: { type: "string" },
+          accent: { type: "string" },
+          background: { type: "string" },
+          surface: { type: "string" },
+          text: { type: "string" },
+          textMuted: { type: "string" },
+          fonts: { type: "string" },
+          titleSize: { type: "string" },
+          bodySize: { type: "string" },
+        },
+        required: ["primary", "accent", "background", "surface", "text", "textMuted", "fonts", "titleSize", "bodySize"],
+      },
+      theme_css: { type: "string", description: "完整 CSS 字符串，含 :root 变量与 .slide 等通用类" },
+      slides: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            kind: { type: "string" },
+            bullets: { type: "array", items: { type: "string" } },
+            notes: { type: "string", description: "该页讲稿片段，1-3 句" },
+          },
+          required: ["title", "kind", "bullets", "notes"],
+        },
+      },
+      style: { type: "string", description: "选用的风格 id；非自动模式填空字符串" },
+    },
+    required: ["design_tokens", "theme_css", "slides", "style"],
+  },
+};
+
+export const slideHtmlTool: ToolDef = {
+  name: "write_slide_html",
+  description:
+    "提交单页幻灯片的完整 HTML 文档。先用一句话说明设计思路，再调用此工具提交完整 HTML。不要把 HTML 直接输出为回复正文。",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      html: { type: "string", description: "完整的 HTML 文档 <!DOCTYPE html>…</html>" },
+    },
+    required: ["html"],
+  },
+};
+
+export const selfCheckTool: ToolDef = {
+  name: "apply_selfcheck",
+  description:
+    "提交自检改写后的完整 HTML 文档。若页面无明显硬伤，也必须原样调用此工具提交。不要把 HTML 直接输出为回复正文。",
+  strict: true,
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      html: { type: "string", description: "自检后的完整 HTML 文档" },
+    },
+    required: ["html"],
+  },
+};
