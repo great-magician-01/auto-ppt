@@ -38,7 +38,7 @@ const runningOnCurrent = computed(
   () =>
     runningHere.value &&
     genState.slideIdx === currentIdx.value &&
-    (genState.phase === "slide" || genState.phase === "chat")
+    (genState.phase === "slide" || genState.phase === "chat" || genState.phase === "selfcheck")
 );
 // 正在生成的页索引（slide/selfcheck 阶段）：在页列表显眼标记该页
 const generatingIdx = computed(() => {
@@ -61,19 +61,16 @@ async function loadMessages() {
   messages.value = sid != null ? await listSlideMessages(sid) : [];
 }
 
-// 当前页 HTML：生成/修改中读 store 实时缓冲，否则读库
-// （切走再回来时 slides 是新数组、不再持有旧引用，故必须读 genState.content 才能见实时流）
 const currentHtml = computed(() => {
   const cur = current.value;
   if (!cur) return "";
   if (
     runningHere.value &&
     genState.slideIdx === currentIdx.value &&
-    (genState.phase === "slide" || genState.phase === "chat")
+    (genState.phase === "slide" || genState.phase === "chat" || genState.phase === "selfcheck")
   ) {
-    // 流式内容非空才用实时流；首个 chunk 到达前回退原页，
-    // 避免发起对话修改瞬间预览变空白（slide 新页无旧内容则仍空，行为不变）
-    const live = cleanHtml(genState.content);
+    // 工具参数流式提取的 html（artifact）非空才用实时流；首个 chunk 到达前回退原页
+    const live = cleanHtml(genState.artifact);
     if (live) return live;
     return cur.html_content ?? "";
   }
