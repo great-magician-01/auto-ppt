@@ -220,16 +220,19 @@ fn emit_anthropic_event(
             if b["type"].as_str() == Some("tool_use") {
                 if let Ok(mut acc) = tool_acc.lock() {
                     let new_idx = acc.len();
+                    let name = b["name"].as_str().unwrap_or("").to_string();
                     acc.push(ToolAccum {
                         index: new_idx,
                         id: b["id"].as_str().unwrap_or("").to_string(),
-                        name: b["name"].as_str().unwrap_or("").to_string(),
+                        name: name.clone(),
                         arguments: String::new(),
                     });
                     *last_tool_slot = (acc.len() as i64) - 1;
+                    if !name.is_empty() {
+                        let _ = app.emit("chat-tool-args", serde_json::json!({"name": name, "delta": ""}));
+                    }
                 }
             }
-            // text/thinking 块不占累积槽，last_tool_slot 不变
         }
         "content_block_delta" => {
             let delta = &v["delta"];
@@ -254,6 +257,10 @@ fn emit_anthropic_event(
                             let i = *last_tool_slot as usize;
                             if i < acc.len() {
                                 acc[i].arguments.push_str(pj);
+                                if !pj.is_empty() {
+                                    let name = acc[i].name.clone();
+                                    let _ = app.emit("chat-tool-args", serde_json::json!({"name": name, "delta": pj}));
+                                }
                             }
                         }
                     }
@@ -525,6 +532,9 @@ async fn chat_stream(
                                     }
                                     if let Some(args) = c["function"]["arguments"].as_str() {
                                         slot.arguments.push_str(args);
+                                        if !args.is_empty() {
+                                            let _ = app2.emit("chat-tool-args", serde_json::json!({"name": slot.name.clone(), "delta": args}));
+                                        }
                                     }
                                 }
                             }
