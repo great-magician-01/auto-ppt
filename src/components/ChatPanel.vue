@@ -174,21 +174,21 @@ defineExpose({ prepend });
   line-height: 1.5;
   word-break: break-word;
 }
-.msg.assistant .md :first-child {
+.msg.assistant .md :deep(:first-child) {
   margin-top: 0;
 }
-.msg.assistant .md :last-child {
+.msg.assistant .md :deep(:last-child) {
   margin-bottom: 0;
 }
-.msg.assistant .md p {
+.msg.assistant .md :deep(p) {
   margin: 0 0 6px;
 }
-.msg.assistant .md ul,
-.msg.assistant .md ol {
+.msg.assistant .md :deep(ul),
+.msg.assistant .md :deep(ol) {
   margin: 0 0 6px;
   padding-left: 20px;
 }
-.msg.assistant .md code {
+.msg.assistant .md :deep(code) {
   background: #f0f1f3;
   padding: 1px 4px;
   border-radius: 3px;
