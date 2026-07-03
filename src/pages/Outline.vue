@@ -11,7 +11,7 @@ import {
   type Slide,
   type Message,
 } from "../lib/db";
-import { parseOutline, type OutlineSlide } from "../lib/prompt";
+import { type OutlineSlide } from "../lib/prompt";
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -32,19 +32,12 @@ watch(() => genState.reasoning, scrollReasoningBottom);
 const isRunning = computed(
   () => genState.running && genState.projectId === projectId
 );
-// 当前大纲结构化展示：生成中尝试解析实时 content；否则从库中已存大纲渲染
-const outlineView = computed<OutlineSlide[]>(() => {
-  if (isRunning.value && genState.content) {
-    try {
-      return parseOutline(genState.content).slides;
-    } catch {
-      return [];
-    }
-  }
-  return slides.value
+// 当前大纲结构化展示：从库中已存大纲渲染（生成中显示占位，落地后由 watch(running) 重载）
+const outlineView = computed<OutlineSlide[]>(() =>
+  slides.value
     .map((s) => (s.outline ? (JSON.parse(s.outline) as OutlineSlide) : null))
-    .filter((s): s is OutlineSlide => s !== null);
-});
+    .filter((s): s is OutlineSlide => s !== null)
+);
 
 onMounted(load);
 
@@ -120,9 +113,15 @@ function goEditor() {
     </div>
     <div class="o-body">
       <section class="o-main">
-        <details v-if="project.manuscript" class="manuscript-block" open>
-          <summary>完整文案（{{ project.manuscript.length }} 字）</summary>
-          <pre>{{ project.manuscript }}</pre>
+        <details
+          v-if="project.manuscript || (isRunning && genState.phase === 'manuscript')"
+          class="manuscript-block"
+          open
+        >
+          <summary>
+            完整文案（{{ (project.manuscript || genState.artifact).length }} 字）
+          </summary>
+          <pre>{{ project.manuscript || genState.artifact }}</pre>
         </details>
         <div v-if="isRunning && !outlineView.length" class="stream">
           <div v-if="genState.reasoning" class="block">
@@ -131,9 +130,9 @@ function goEditor() {
           </div>
           <div class="block">
             <span class="label">
-              {{ genState.phase === 'manuscript' ? '文案（生成中）' : '正文（JSON 流式）' }}
+              {{ genState.phase === 'manuscript' ? '文案（生成中）' : '大纲（生成中）' }}
             </span>
-            <pre>{{ genState.content }}</pre>
+            <pre>{{ genState.phase === 'manuscript' ? (project.manuscript || genState.artifact) : '正在生成大纲…' }}</pre>
           </div>
         </div>
         <div v-else class="outline-cards">
