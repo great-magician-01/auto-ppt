@@ -1,6 +1,16 @@
 import { reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { chat, chatOnce, chatAgent, type ChatMsg, type CancelledError, type ToolCall } from "./chat";
+import {
+  chat,
+  chatOnce,
+  chatAgent,
+  type ChatMsg,
+  type CancelledError,
+  type ToolCall,
+  type ToolDef,
+  type ToolChoice,
+} from "./chat";
+import { extractStringArg } from "./toolUtils";
 import {
   manuscriptPrompt,
   splitOutlinePrompt,
@@ -50,6 +60,7 @@ export const genState = reactive({
   slideIdx: 0,
   reasoning: "",
   content: "",
+  artifact: "", // 工具参数提取的产物（html/文案），进预览
   status: "",
   error: null as string | null,
   cancelled: false,
@@ -58,12 +69,20 @@ export const genState = reactive({
 function resetBuffers() {
   genState.reasoning = "";
   genState.content = "";
+  genState.artifact = "";
   genState.error = null;
   genState.cancelled = false;
 }
 
 function isCancelled(e: unknown): boolean {
   return !!e && typeof e === "object" && (e as CancelledError).__cancelled === true;
+}
+
+/** 构造取消哨兵错误，供 runToolPhase 在 cancel 时抛出。 */
+function makeCancelled(): CancelledError {
+  const err = new Error("已取消") as CancelledError;
+  err.__cancelled = true;
+  return err;
 }
 
 /** 取消当前生成：置标志 + 调 Rust abort。 */
@@ -118,6 +137,89 @@ async function execTavilyTool(call: ToolCall, apiKey: string): Promise<string> {
 }
 
 // 阶段1a：生成完整文案（联网时用工具调研）；阶段1b：按文案拆页（JSON 模式）。
+
+/**
+ * 单发工具阶段原语：强制 requiredTool 一轮到位。
+ * - chat-chunk → genState.content（自然语言，进对话框，实时）
+ * - chat-tool-args → 提取 artifactField → genState.artifact（进预览，实时）
+ * - 回合末校验（API Schema 已强校验 + validate 业务规则）；合法 → execTool 落库 + 回填 tool_result；
+ *   不合法/未调用 → 回填错误 + system 重试一次（再强制）；仍失败 → 抛错。
+ * 返回 { nlText, parsedArgs } 供调用方生成消息卡片 label。
+ */
+export async function runToolPhase(args: {
+  systemPrompt: string;
+  userPrompt: string;
+  requiredTool: ToolDef;
+  tools?: ToolDef[];
+  execTool: (call: ToolCall, parsedArgs: unknown) => Promise<string>;
+  validate?: (parsedArgs: unknown) => string | null;
+  artifactField?: string; // 单字段工具：从参数提取该字段进 genState.artifact
+  maxRetries?: number;
+}): Promise<{ nlText: string; parsedArgs: unknown; call: ToolCall }> {
+  const tools = args.tools ?? [args.requiredTool];
+  const maxRetries = args.maxRetries ?? 1;
+  const messages: ChatMsg[] = [
+    { role: "system", content: args.systemPrompt },
+    { role: "user", content: args.userPrompt },
+  ];
+  let lastErr = "";
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (genState.cancelled) throw makeCancelled();
+    let nlText = "";
+    let argBuf = "";
+    const { toolCalls } = await chat(
+      messages,
+      (d) => { nlText += d; genState.content += d; },
+      (d) => { genState.reasoning += d; },
+      false,
+      {
+        tools,
+        toolChoice: { type: "tool", name: args.requiredTool.name } as ToolChoice,
+        onToolArgs: (e) => {
+          if (e.name === args.requiredTool.name) {
+            argBuf += e.delta;
+            if (args.artifactField) {
+              genState.artifact = extractStringArg(argBuf);
+            }
+          }
+        },
+      }
+    );
+    if (genState.cancelled) throw makeCancelled();
+    const call = toolCalls?.find((c) => c.name === args.requiredTool.name) ?? null;
+    if (!call) {
+      lastErr = `模型未调用工具 ${args.requiredTool.name}`;
+      messages.push({ role: "assistant", content: nlText });
+      messages.push({ role: "system", content: `${lastErr}，请调用 ${args.requiredTool.name} 提交结果。` });
+      continue;
+    }
+    let parsedArgs: unknown;
+    try {
+      parsedArgs = JSON.parse(call.arguments);
+    } catch {
+      lastErr = "工具参数不是合法 JSON";
+      messages.push({ role: "assistant", content: nlText, tool_calls: [call] });
+      messages.push({ role: "tool", content: `[校验错误] ${lastErr}`, tool_call_id: call.id });
+      messages.push({ role: "system", content: `请重新调用 ${args.requiredTool.name}，修正：${lastErr}` });
+      continue;
+    }
+    const verr = args.validate ? args.validate(parsedArgs) : null;
+    if (verr) {
+      lastErr = verr;
+      messages.push({ role: "assistant", content: nlText, tool_calls: [call] });
+      messages.push({ role: "tool", content: `[校验错误] ${lastErr}`, tool_call_id: call.id });
+      messages.push({ role: "system", content: `请重新调用 ${args.requiredTool.name}，修正：${lastErr}` });
+      continue;
+    }
+    // 合法 → 落库 + 回填（单发不再请求模型，但保持历史完整）
+    const result = await args.execTool(call, parsedArgs);
+    messages.push({ role: "assistant", content: nlText, tool_calls: [call] });
+    messages.push({ role: "tool", content: result, tool_call_id: call.id });
+    return { nlText, parsedArgs, call };
+  }
+  throw new Error(`${args.requiredTool.name} 校验失败：${lastErr}`);
+}
+
 export async function startOutline(
   projectId: number,
   topic: string,
