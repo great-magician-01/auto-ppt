@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
 import type { Message } from "../lib/db";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 const props = defineProps<{
   messages: Message[];
@@ -11,6 +13,21 @@ const props = defineProps<{
   placeholder?: string;
 }>();
 const emit = defineEmits<{ send: [text: string] }>();
+
+/** assistant 消息 markdown 渲染为安全 HTML（防注入）。 */
+function renderMd(s: string): string {
+  if (!s) return "";
+  return DOMPurify.sanitize(marked.parse(s) as string);
+}
+/** 工具调用卡片的一行标签（从 messages.tool_call JSON 取 label）。 */
+function toolLabelOf(m: Message): string | null {
+  if (!m.tool_call) return null;
+  try {
+    return (JSON.parse(m.tool_call) as { label?: string }).label ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const input = ref("");
 const listEl = ref<HTMLElement | null>(null);
@@ -48,7 +65,12 @@ defineExpose({ prepend });
     <div class="chat-list" ref="listEl">
       <div v-for="m in messages" :key="m.id ?? m.content" class="msg" :class="m.role">
         <span class="role">{{ m.role }}</span>
-        <div>{{ m.content }}</div>
+        <div v-if="m.role === 'assistant'" class="md" v-html="renderMd(m.content)"></div>
+        <div v-else>{{ m.content }}</div>
+        <!-- 工具调用卡片：工具调用产物阶段回填的 {name,label} -->
+        <details v-if="m.role === 'assistant' && toolLabelOf(m)" class="msg-tool">
+          <summary>{{ toolLabelOf(m) }}</summary>
+        </details>
         <!-- 持久化思考：完成时回填到助手消息上，默认收起，可点开 -->
         <details v-if="m.role === 'assistant' && m.reasoning" class="msg-reasoning">
           <summary>思考 · {{ m.reasoning.length }} 字</summary>
@@ -146,5 +168,42 @@ defineExpose({ prepend });
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.msg.assistant .md {
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.msg.assistant .md :first-child {
+  margin-top: 0;
+}
+.msg.assistant .md :last-child {
+  margin-bottom: 0;
+}
+.msg.assistant .md p {
+  margin: 0 0 6px;
+}
+.msg.assistant .md ul,
+.msg.assistant .md ol {
+  margin: 0 0 6px;
+  padding-left: 20px;
+}
+.msg.assistant .md code {
+  background: #f0f1f3;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.msg-tool {
+  margin-top: 6px;
+}
+.msg-tool summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--primary);
+  background: #eef;
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 </style>
