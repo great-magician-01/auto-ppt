@@ -525,7 +525,7 @@ async fn chat_stream(
                                     }
                                     if let Some(args) = c["function"]["arguments"].as_str() {
                                         slot.arguments.push_str(args);
-                                        if !args.is_empty() {
+                                        if !args.is_empty() && !slot.name.is_empty() {
                                             let _ = app2.emit("chat-tool-args", serde_json::json!({"name": slot.name.clone(), "delta": args}));
                                         }
                                     }

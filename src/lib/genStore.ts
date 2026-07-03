@@ -513,7 +513,7 @@ export async function startSlide(
       artifactField: "html",
       validate: (parsed) => {
         const html = (parsed as { html?: string }).html ?? "";
-        if (!/<html/i.test(html) || (!/\.slide\b/.test(html) && !/class="slide"/.test(html)))
+        if (!/<html/i.test(html) || (!/\.slide\b/.test(html) && !/class=["']slide["']/.test(html)))
           return "HTML 必须是含 .slide 画布的完整文档";
         return null;
       },
@@ -631,7 +631,7 @@ export async function selfCheckSlide(
       }
     }
     html = cleanHtml(html || genState.artifact);
-    const structOk = /<html/i.test(html) && (/\.slide\b/.test(html) || /class="slide"/.test(html));
+    const structOk = /<html/i.test(html) && (/\.slide\b/.test(html) || /class=["']slide["']/.test(html));
     const themeOk = structOk && themeFingerprint(html) === originalFp;
     if (themeOk) {
       slide.html_content = html;
@@ -720,7 +720,7 @@ export async function sendChat(
       artifactField: "html",
       validate: (parsed) => {
         const html = (parsed as { html?: string }).html ?? "";
-        if (!/<html/i.test(html) || (!/\.slide\b/.test(html) && !/class="slide"/.test(html)))
+        if (!/<html/i.test(html) || (!/\.slide\b/.test(html) && !/class=["']slide["']/.test(html)))
           return "HTML 必须是含 .slide 画布的完整文档";
         return null;
       },
