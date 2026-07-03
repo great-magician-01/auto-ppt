@@ -10,9 +10,10 @@ import {
   type ToolDef,
   type ToolChoice,
 } from "./chat";
-import { extractStringArg } from "./toolUtils";
+import { extractStringArg, toolLabel } from "./toolUtils";
 import {
   manuscriptPrompt,
+  manuscriptTool,
   splitOutlinePrompt,
   slideHtmlPrompt,
   parseOutline,
@@ -240,91 +241,111 @@ export async function startOutline(
       genState.status = "已有完整文案（" + manuscript.length + " 字），跳过调研直接拆分大纲…";
       genState.content = manuscript; // 让 UI 可见
     } else {
-    let useSearch = searchEnabled;
-    let apiKey: string | null = null;
-    if (useSearch) {
-      apiKey = await getTavilyKey();
-      if (!apiKey) {
-        useSearch = false;
-        genState.status = "未配置 Tavily Key，离线生成文案…";
-      }
-    }
-    const msgs: ChatMsg[] = [
-      { role: "system", content: "你是专业 PPT 文案策划，严格按要求输出。" },
-      { role: "user", content: manuscriptPrompt(topic) },
-    ];
-    if (useSearch && apiKey) {
-      genState.status = "联网调研并撰写文案…";
-      try {
-        manuscript = await chatAgent(
-          msgs,
-          tavilyTools,
-          (call) => execTavilyTool(call, apiKey!),
-          (d) => {
-            genState.content += d;
-            genState.status = `撰写文案中… 已收到 ${genState.content.length} 字`;
-          },
-          (d) => {
-            genState.reasoning += d;
-          },
-          () => {
-            // 每轮开始清空 content（只留最终轮文案）
-            genState.content = "";
-          },
-          undefined, // limits (default)
-          () => genState.cancelled
-        );
-      } catch (e) {
-        if (isCancelled(e)) throw e;
-        // 模型不支持工具/格式不支持 → 降级离线写文案（用 chat 让 UI 见实时流）
-        genState.status = "联网搜索不可用，改为离线生成文案…";
-        genState.content = "";
-        manuscript = "";
-        await chat(
-          msgs,
-          (d) => {
-            manuscript += d;
-            genState.content += d;
-            genState.status = `撰写文案中… 已收到 ${genState.content.length} 字`;
-          },
-          (d) => {
-            genState.reasoning += d;
-          }
-        );
-      }
-    } else {
-      genState.status = "撰写文案中…";
-      manuscript = "";
-      await chat(
-        msgs,
-        (d) => {
-          manuscript += d;
-          genState.content += d;
-          genState.status = `撰写文案中… 已收到 ${genState.content.length} 字`;
-        },
-        (d) => {
-          genState.reasoning += d;
+      let useSearch = searchEnabled;
+      let apiKey: string | null = null;
+      if (useSearch) {
+        apiKey = await getTavilyKey();
+        if (!apiKey) {
+          useSearch = false;
+          genState.status = "未配置 Tavily Key，离线生成文案…";
         }
+      }
+      const sysMsg = "你是专业 PPT 文案策划，严格按要求输出。";
+      const userMsg = manuscriptPrompt(topic);
+      let manuscriptLabel = "";
+      if (useSearch && apiKey) {
+        genState.status = "联网调研并撰写文案…";
+        let capturedManuscript = "";
+        let manArgBuf = "";
+        const execManuscriptTool = async (call: ToolCall): Promise<string> => {
+          if (call.name === "write_manuscript") {
+            try {
+              const a = JSON.parse(call.arguments) as { content?: string };
+              capturedManuscript = a.content ?? "";
+              genState.artifact = capturedManuscript;
+              await updateProject(projectId, { manuscript: capturedManuscript });
+              manuscriptLabel = toolLabel("write_manuscript", a);
+              return `已保存文案（${capturedManuscript.length} 字）`;
+            } catch {
+              return "[工具错误] 参数解析失败";
+            }
+          }
+          return execTavilyTool(call, apiKey!);
+        };
+        try {
+          await chatAgent(
+            [{ role: "system", content: sysMsg }, { role: "user", content: userMsg }],
+            [...tavilyTools, manuscriptTool],
+            execManuscriptTool,
+            (d) => {
+              genState.content += d;
+              genState.status = `撰写文案中… 已收到 ${genState.content.length} 字`;
+            },
+            (d) => { genState.reasoning += d; },
+            () => { genState.content = ""; }, // 每轮清空 NL（只留最终轮）
+            undefined,
+            () => genState.cancelled,
+            "write_manuscript",
+            (e) => {
+              if (e.name === "write_manuscript") {
+                manArgBuf += e.delta;
+                genState.artifact = extractStringArg(manArgBuf);
+              }
+            }
+          );
+          manuscript = capturedManuscript;
+        } catch (e) {
+          if (isCancelled(e)) throw e;
+          // 联网不可用 → 降级离线 runToolPhase
+          genState.status = "联网搜索不可用，改为离线生成文案…";
+          genState.content = "";
+          const r = await runToolPhase({
+            systemPrompt: sysMsg,
+            userPrompt: userMsg,
+            requiredTool: manuscriptTool,
+            artifactField: "content",
+            execTool: async (_c, parsed) => {
+              const a = parsed as { content: string };
+              manuscript = a.content;
+              await updateProject(projectId, { manuscript });
+              manuscriptLabel = toolLabel("write_manuscript", a);
+              return `已保存文案（${a.content.length} 字）`;
+            },
+          });
+          manuscript = (r.parsedArgs as { content: string }).content;
+        }
+      } else {
+        genState.status = "撰写文案中…";
+        const r = await runToolPhase({
+          systemPrompt: sysMsg,
+          userPrompt: userMsg,
+          requiredTool: manuscriptTool,
+          artifactField: "content",
+          execTool: async (_c, parsed) => {
+            const a = parsed as { content: string };
+            manuscript = a.content;
+            await updateProject(projectId, { manuscript });
+            manuscriptLabel = toolLabel("write_manuscript", a);
+            return `已保存文案（${a.content.length} 字）`;
+          },
+        });
+        manuscript = (r.parsedArgs as { content: string }).content;
+      }
+      if (genState.cancelled) {
+        genState.status = "已取消";
+        return;
+      }
+      if (!manuscript.trim()) {
+        throw new Error("文案生成失败：模型未产出任何文案内容，请重试或调整主题。");
+      }
+      await addMessage(
+        projectId,
+        "assistant",
+        "已生成完整文案。",
+        null,
+        genState.reasoning,
+        JSON.stringify({ name: "write_manuscript", label: manuscriptLabel || toolLabel("write_manuscript", { content: manuscript }) })
       );
-    }
-    if (genState.cancelled) {
-      genState.status = "已取消";
-      return;
-    }
-    manuscript = manuscript || genState.content;
-    if (!manuscript.trim()) {
-      // 模型最终轮只产出工具调用而无文本，或返回空：文案先行流程无内容可拆页，直接报错
-      // （不写空 manuscript、不进入拆页阶段，避免凭主题凭空生成空洞大纲）
-      throw new Error("文案生成失败：模型未产出任何文案内容，请重试或调整主题。");
-    }
-    await updateProject(projectId, { manuscript });
-    await addMessage(
-      projectId,
-      "assistant",
-      `已生成完整文案（${manuscript.length} 字）。`,
-      null,
-      genState.reasoning
-    );
     } // 结束 if (proj?.manuscript) else 分支
 
     // —— 拆页阶段 ——
