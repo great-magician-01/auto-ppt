@@ -25,7 +25,7 @@ export function splitOutlinePrompt(
   } else {
     const all = STYLE_PRESETS.map(presetToPromptText).join("\n");
     styleSection = `\n\n【风格选择】\n下方是候选风格，请挑选最契合主题的一个，并据此设计 design_tokens 与 theme_css：\n${all}`;
-    styleReturnClause = `\n4. style：你在上面挑选的风格 id（字符串）。`;
+    styleReturnClause = `\n- style：你在上面挑选的风格 id（字符串）。`;
   }
 
   return `你是一位专业的 PPT 设计师与信息架构师。下面是已经撰写好的完整文案，请据此为主题「${topic}」设计一份精美的 PPT：先确定统一的设计系统，再把文案拆分为各页大纲。${styleSection}
@@ -35,7 +35,7 @@ ${manuscript}
 
 【页数】由你根据文案内容的丰富程度自行判断决定：内容丰富的主题可多到 20 页以上，简单的主题可少至 6 页左右，以“每页都有实质信息、不空洞、不冗余”为原则。不要固定页数，也不要为了凑数而堆砌页或拆得过碎。
 
-【输出要求】
+【设计要求】
 1. design_tokens：专业协调的配色与字体方案，字段为 primary / accent / background / surface / text / textMuted / fonts / titleSize / bodySize（颜色用 #hex；titleSize 72–96px、bodySize 32–44px，必须保证投影可读，禁止偏小）。字体用系统通用字体族（如 "Microsoft YaHei"/"PingFang SC"/sans-serif 或 monospace），不要依赖需联网加载的字体。
 2. theme_css：基于上述 tokens 的完整 CSS，包含 :root 中的 CSS 变量，以及通用类 .slide、.slide-title、.slide-body、.accent-bar 等。所有页面共享它。theme_css 必须遵守以下弹性铁律以防止内容溢出：
    - .slide 固定为 ${SLIDE_W}px × ${SLIDE_H}px（16:9），overflow:hidden，box-sizing:border-box，且必须 display:flex; flex-direction:column;
@@ -43,12 +43,14 @@ ${manuscript}
    - :root 中的字号变量必须使用 clamp() 实现弹性，如 --titleSize: clamp(56px, 5vw, 96px); --bodySize: clamp(24px, 2vw, 40px); 确保内容多时自动缩小，但正文最小不低于 20px
    - 所有直接子内容容器（如 .content、.grid、.columns、.cards）必须允许弹性收缩：使用 min-height:0; flex-shrink:1; overflow:visible（不要加 overflow:hidden，否则截图时隐藏内容会丢失）
    - 文本容器必须设置合理的 max-height（如 calc(100% - 标题高度)）配合 overflow:visible，确保所有文本在截图时完整可见
-3. slides：数组，第一页 kind=cover（封面），最后一页 kind=ending（致谢），中间用 cover/bullets/two-column/quote/section 等版式。每页含 title（标题）、kind（版式）、bullets（要点字符串数组）、notes（该页讲稿片段，从对应文案摘取，演讲用，1–3 句或对应要点）。中间内容页 bullets 至少 4 条，每条应是一个有信息量的完整要点（可含简短支撑说明、数据或案例），内容充实专业、紧扣主题展开；封面/致谢可短。${styleReturnClause}
+3. slides：数组，第一页 kind=cover（封面），最后一页 kind=ending（致谢），中间用 cover/bullets/two-column/quote/section 等版式。每页含 title（标题）、kind（版式）、bullets（要点字符串数组）、notes（该页讲稿片段，从对应文案摘取，演讲用，1–3 句或对应要点）。中间内容页 bullets 至少 4 条，每条应是一个有信息量的完整要点（可含简短支撑说明、数据或案例），内容充实专业、紧扣主题展开；封面/致谢可短。
 
 内容要专业、充实、紧扣主题，避免空洞。
 
-【严格】只返回一个 JSON 对象，不要 markdown 代码块、不要解释文字。结构如下：
-{"design_tokens":{...},"theme_css":"/* css string */","slides":[{"title":"","kind":"cover","bullets":[],"notes":""}...],"style":"<风格id，仅自动模式需要>"}`;
+【提交方式】
+- 通过调用 commit_outline 工具提交 design_tokens / theme_css / slides / style，不要把 JSON 直接输出为回复正文。
+- 可以先用一两句话说明设计思路，再调用 commit_outline。${styleReturnClause}
+- 非自动模式（已指定风格）时 style 填空字符串。`;
 }
 
 export interface OutlineSlide {

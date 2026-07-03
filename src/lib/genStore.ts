@@ -2,7 +2,6 @@ import { reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   chat,
-  chatOnce,
   chatAgent,
   type ChatMsg,
   type CancelledError,
@@ -16,11 +15,11 @@ import {
   manuscriptTool,
   splitOutlinePrompt,
   slideHtmlPrompt,
-  parseOutline,
   cleanHtml,
   selfCheckPrompt,
   chatWithElementPrompt,
   tavilyTools,
+  outlineTool,
   type OutlineSlide,
 } from "./prompt";
 import {
@@ -355,68 +354,55 @@ export async function startOutline(
     }
     genState.phase = "outline";
     resetBuffers();
-    let parsed: ReturnType<typeof parseOutline> | null = null;
-    let lastErr: unknown = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      if (genState.cancelled) break;
-      genState.status = `按文案拆分大纲（第 ${attempt} 次）…`;
-      const raw = await chatOnce(
-        [
-          { role: "system", content: "你是专业 PPT 设计师，严格按要求返回 JSON。" },
-          { role: "user", content: splitOutlinePrompt(topic, manuscript, style) },
-        ],
-        (d) => {
-          genState.reasoning += d;
-          genState.status = `思考中… 已收到 ${genState.reasoning.length} 字思考`;
-        },
-        true // jsonMode
-      );
-      if (genState.cancelled) break;
-      genState.content = raw;
-      try {
-        parsed = parseOutline(raw);
-        break;
-      } catch (e) {
-        lastErr = e;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (attempt < 2) genState.status = `解析失败，重试中…（${msg}）`;
-      }
-    }
-    if (genState.cancelled) {
-      genState.status = "已取消";
-      return;
-    }
-    if (!parsed) throw new Error("大纲解析失败：" + (lastErr instanceof Error ? lastErr.message : String(lastErr)));
-
-    const tokensJson = JSON.stringify(parsed.design_tokens, null, 2);
-    // 自动模式下，若模型回填了 style，写回 project.style
-    const resolvedStyle = (parsed as { style?: string }).style ?? style ?? null;
-    await updateProject(projectId, {
-      design_tokens: tokensJson,
-      theme_css: parsed.theme_css,
-      style: resolvedStyle,
+    const r = await runToolPhase({
+      systemPrompt: "你是专业 PPT 设计师，按要求调用 commit_outline 提交设计系统与全部页面大纲。",
+      userPrompt: splitOutlinePrompt(topic, manuscript, style),
+      requiredTool: outlineTool,
+      validate: (parsed) => {
+        const a = parsed as { slides?: OutlineSlide[] };
+        if (!a.slides || !a.slides.length) return "slides 不能为空";
+        if (a.slides.some((s) => !s.title)) return "每页必须有 title";
+        return null;
+      },
+      execTool: async (_c, parsed) => {
+        const a = parsed as {
+          design_tokens: Record<string, string>;
+          theme_css: string;
+          slides: OutlineSlide[];
+          style?: string;
+        };
+        const tokensJson = JSON.stringify(a.design_tokens, null, 2);
+        const resolvedStyle = a.style ?? style ?? null;
+        await updateProject(projectId, {
+          design_tokens: tokensJson,
+          theme_css: a.theme_css,
+          style: resolvedStyle,
+        });
+        for (const s of await listSlides(projectId)) {
+          if (s.id) await deleteSlide(s.id);
+        }
+        for (let i = 0; i < a.slides.length; i++) {
+          const s = a.slides[i];
+          await upsertSlide({
+            project_id: projectId,
+            sort: i,
+            title: s.title,
+            outline: JSON.stringify(s),
+            html_content: null,
+          });
+        }
+        return `已保存 ${a.slides.length} 页大纲`;
+      },
     });
-
-    // 覆盖写 slides：先删旧再插新（每页 outline JSON 含 notes）
-    for (const s of await listSlides(projectId)) {
-      if (s.id) await deleteSlide(s.id);
-    }
-    for (let i = 0; i < parsed.slides.length; i++) {
-      const s: OutlineSlide = parsed.slides[i];
-      await upsertSlide({
-        project_id: projectId,
-        sort: i,
-        title: s.title,
-        outline: JSON.stringify(s),
-        html_content: null,
-      });
-    }
+    const slideCount = (r.parsedArgs as { slides: OutlineSlide[] }).slides.length;
+    const label = toolLabel("commit_outline", r.parsedArgs);
     await addMessage(
       projectId,
       "assistant",
-      `已生成大纲（${parsed.slides.length} 页）与设计系统。`,
+      r.nlText || `已生成大纲（${slideCount} 页）与设计系统。`,
       null,
-      genState.reasoning
+      genState.reasoning,
+      JSON.stringify({ name: "commit_outline", label })
     );
     genState.status = "大纲已生成，可进入编辑器逐页生成 HTML";
   } catch (e) {
@@ -432,7 +418,7 @@ export async function startOutline(
   }
 }
 
-// 大纲对话修改：非 JSON 模式，提示词约束返回同结构 JSON。解析成功才覆盖写库。
+// 大纲对话修改：强制 commit_outline，校验通过才覆盖写库。
 export async function sendOutlineChat(
   projectId: number,
   topic: string,
@@ -446,65 +432,62 @@ export async function sendOutlineChat(
   genState.phase = "outline-chat";
   resetBuffers();
   try {
-    const msgs: ChatMsg[] = [
-      {
-        role: "system",
-        content:
-          "你是专业 PPT 设计师。根据用户指令修改给定的大纲 JSON，只返回修改后的完整 JSON 对象（结构同生成阶段：design_tokens/theme_css/slides[/style]），不要 markdown 代码块、不要任何解释文字。每页必须保留 notes 字段（讲稿片段），不可省略或清空；修改页面的同时维护 notes 与对应要点对齐。",
+    const userPrompt =
+      `主题：${topic}${manuscript ? `\n\n【完整文案（供参考，修改大纲时确保覆盖文案要点）】\n${manuscript}` : ""}\n\n当前大纲 JSON：\n${JSON.stringify(
+        { slides: currentSlides },
+        null,
+        2
+      )}\n\n用户修改指令：${instruction}`;
+    const r = await runToolPhase({
+      systemPrompt:
+        "你是专业 PPT 设计师。根据用户指令修改大纲，调用 commit_outline 提交修改后的完整设计系统与全部页面（design_tokens/theme_css/slides/style）。每页必须保留 notes 字段，修改页面的同时维护 notes 与要点对齐。",
+      userPrompt,
+      requiredTool: outlineTool,
+      validate: (parsed) => {
+        const a = parsed as { slides?: OutlineSlide[] };
+        if (!a.slides || !a.slides.length) return "slides 不能为空";
+        if (a.slides.some((s) => !s.title)) return "每页必须有 title";
+        return null;
       },
-      {
-        role: "user",
-        content:
-          `主题：${topic}${manuscript ? `\n\n【完整文案（供参考，修改大纲时确保覆盖文案要点）】\n${manuscript}` : ""}\n\n当前大纲 JSON：\n${JSON.stringify(
-            { slides: currentSlides },
-            null,
-            2
-          )}\n\n用户修改指令：${instruction}`,
+      execTool: async (_c, parsed) => {
+        const a = parsed as {
+          design_tokens: Record<string, string>;
+          theme_css: string;
+          slides: OutlineSlide[];
+          style?: string;
+        };
+        const tokensJson = JSON.stringify(a.design_tokens, null, 2);
+        const resolvedStyle = a.style ?? style ?? null;
+        await updateProject(projectId, {
+          design_tokens: tokensJson,
+          theme_css: a.theme_css,
+          style: resolvedStyle,
+        });
+        for (const s of await listSlides(projectId)) {
+          if (s.id) await deleteSlide(s.id);
+        }
+        for (let i = 0; i < a.slides.length; i++) {
+          const s = a.slides[i];
+          await upsertSlide({
+            project_id: projectId,
+            sort: i,
+            title: s.title,
+            outline: JSON.stringify(s),
+            html_content: null,
+          });
+        }
+        return `已保存 ${a.slides.length} 页大纲`;
       },
-    ];
-    await chat(
-      msgs,
-      (d) => {
-        genState.content += d;
-        genState.status = `修改大纲中… 已收到 ${genState.content.length} 字`;
-      },
-      (d) => {
-        genState.reasoning += d;
-        genState.status = `思考中… 已收到 ${genState.reasoning.length} 字思考`;
-      }
-      // 非 jsonMode：HTML/对话不开 JSON 模式
-    );
-    if (genState.cancelled) {
-      genState.status = "已取消";
-      return;
-    }
-    const parsed = parseOutline(genState.content);
-    const tokensJson = JSON.stringify(parsed.design_tokens, null, 2);
-    const resolvedStyle = (parsed as { style?: string }).style ?? style ?? null;
-    await updateProject(projectId, {
-      design_tokens: tokensJson,
-      theme_css: parsed.theme_css,
-      style: resolvedStyle,
     });
-    for (const s of await listSlides(projectId)) {
-      if (s.id) await deleteSlide(s.id);
-    }
-    for (let i = 0; i < parsed.slides.length; i++) {
-      const s: OutlineSlide = parsed.slides[i];
-      await upsertSlide({
-        project_id: projectId,
-        sort: i,
-        title: s.title,
-        outline: JSON.stringify(s),
-        html_content: null,
-      });
-    }
+    const slideCount = (r.parsedArgs as { slides: OutlineSlide[] }).slides.length;
+    const label = toolLabel("commit_outline", r.parsedArgs);
     await addMessage(
       projectId,
       "assistant",
-      `已按指令更新大纲（${parsed.slides.length} 页）。`,
+      r.nlText || `已按指令更新大纲（${slideCount} 页）。`,
       null,
-      genState.reasoning
+      genState.reasoning,
+      JSON.stringify({ name: "commit_outline", label })
     );
     genState.status = "大纲已更新";
   } catch (e) {
@@ -513,7 +496,7 @@ export async function sendOutlineChat(
     } else {
       genState.error = e instanceof Error ? e.message : String(e);
       genState.status = "错误：" + genState.error;
-      // 解析失败时保留原大纲不覆盖写库（update 仅在 parse 成功后执行，已满足）
+      // 校验失败不写库（execTool 仅在校验通过后执行）
     }
   } finally {
     genState.running = false;
