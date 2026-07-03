@@ -45,15 +45,11 @@ export interface CancelledError extends Error {
  *  - chat-chunk    : 正式回答增量文本
  *  - chat-reasoning : 思考模式下的思考过程增量（思考阶段只有它，没有 chunk）
  *  - chat-done     : 流结束
- *
- * @param jsonMode 为 true 时强制 JSON 输出（OpenAI 的 response_format=json_object），
- *                 仅用于大纲等需要 JSON 的场景；Anthropic 忽略此项靠提示词约束。HTML 生成不可开。
  */
 export async function chat(
   messages: ChatMsg[],
   onChunk: (delta: string) => void,
   onReasoning?: (delta: string) => void,
-  jsonMode = false,
   opts?: {
     tools?: ToolDef[];
     toolChoice?: ToolChoice;
@@ -72,7 +68,6 @@ export async function chat(
     format: ai.format,
     thinking_mode: ai.thinking_mode,
     thinking_effort: ai.thinking_effort,
-    json_mode: jsonMode,
   };
   if (opts?.tools?.length) {
     config.tools = opts.tools;
@@ -126,11 +121,10 @@ export async function chat(
  */
 export async function chatOnce(
   messages: ChatMsg[],
-  onReasoning?: (delta: string) => void,
-  jsonMode = false
+  onReasoning?: (delta: string) => void
 ): Promise<string> {
   let full = "";
-  await chat(messages, (d) => (full += d), onReasoning, jsonMode);
+  await chat(messages, (d) => (full += d), onReasoning);
   return full;
 }
 
@@ -173,7 +167,6 @@ export async function chatAgent(
       messages,
       (d) => { finalText += d; onChunk(d); },
       onReasoning,
-      false,
       { tools, toolChoice, onToolArgs }
     );
     if (isCancelled?.()) return finalText;
@@ -232,7 +225,6 @@ export async function chatAgent(
       messages,
       (d) => { finalText += d; onChunk(d); },
       onReasoning,
-      false,
       { tools, toolChoice: { type: "tool", name: commitTool }, onToolArgs }
     );
   }

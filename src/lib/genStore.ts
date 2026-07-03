@@ -173,7 +173,6 @@ export async function runToolPhase(args: {
       messages,
       (d) => { nlText += d; genState.content += d; },
       (d) => { genState.reasoning += d; },
-      false,
       {
         tools,
         toolChoice: { type: "tool", name: args.requiredTool.name } as ToolChoice,
@@ -629,7 +628,6 @@ export async function selfCheckSlide(
       ],
       (d) => { genState.content += d; },
       (d) => { genState.reasoning += d; },
-      false,
       {
         tools: [selfCheckTool],
         toolChoice: { type: "tool", name: "apply_selfcheck" },

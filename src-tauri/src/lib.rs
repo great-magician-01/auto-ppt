@@ -61,8 +61,6 @@ struct ChatConfig {
     #[serde(default)]
     thinking_effort: String,
     #[serde(default)]
-    json_mode: bool,
-    #[serde(default)]
     tools: Vec<ToolDef>,
     #[serde(default)]
     tool_choice: Option<ToolChoice>,
@@ -360,7 +358,7 @@ async fn chat_stream(
                 }
             }
         }
-        // Anthropic 无 response_format json_object；忽略 json_mode，靠提示词约束
+        // Anthropic 无 response_format json_object
         client
             .post(&url)
             .header("x-api-key", &config.api_key)
@@ -407,11 +405,6 @@ async fn chat_stream(
                     None => serde_json::json!("auto"),
                 };
                 obj.insert("tool_choice".to_string(), tc);
-            }
-        }
-        if config.json_mode {
-            if let Some(obj) = body.as_object_mut() {
-                obj.insert("response_format".to_string(), serde_json::json!({"type":"json_object"}));
             }
         }
         client

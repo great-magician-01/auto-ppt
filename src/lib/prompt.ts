@@ -101,51 +101,6 @@ ${themeCss}
 10. 通过调用 write_slide_html 工具提交完整 HTML（html 参数），不要把 HTML 直接输出为回复正文。先用一句话说明本页设计思路，再调用工具。`;
 }
 
-/**
- * 从字符串中提取第一个完整的顶层 JSON 对象（大括号配平，跳过字符串内的括号）。
- * 可忽略 JSON 前后的解释文字、代码块标记等。
- */
-export function extractFirstJsonObject(s: string): string {
-  const start = s.indexOf("{");
-  if (start < 0) throw new Error('未找到 JSON 起始 "{"');
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === "\\") esc = true;
-      else if (c === '"') inStr = false;
-    } else {
-      if (c === '"') inStr = true;
-      else if (c === "{") depth++;
-      else if (c === "}") {
-        depth--;
-        if (depth === 0) return s.slice(start, i + 1);
-      }
-    }
-  }
-  throw new Error('JSON 大括号未闭合');
-}
-
-/** 解析模型返回的 JSON（容错：去代码块包裹 + 大括号配平提取，忽略 JSON 后的解释文字）。 */
-export function parseOutline(raw: string): {
-  design_tokens: Record<string, string>;
-  theme_css: string;
-  slides: OutlineSlide[];
-} {
-  let s = raw.trim();
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fence) s = fence[1].trim();
-  s = extractFirstJsonObject(s);
-  const obj = JSON.parse(s);
-  if (!obj || !Array.isArray(obj.slides)) {
-    throw new Error("大纲缺少 slides 字段或格式不符");
-  }
-  return obj;
-}
-
 /** 清理单页 HTML（去掉可能的 ``` 包裹；流式中途未闭合的代码块也处理）。 */
 export function cleanHtml(raw: string): string {
   let s = raw.trim();
