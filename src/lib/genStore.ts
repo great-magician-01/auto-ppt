@@ -98,6 +98,49 @@ export async function cancelGeneration(): Promise<void> {
   }
 }
 
+/** commit_outline 业务校验：slides 非空 + 每页有 title。返回错误文案或 null。 */
+function validateOutline(parsed: unknown): string | null {
+  const a = parsed as { slides?: OutlineSlide[] };
+  if (!a.slides || !a.slides.length) return "slides 不能为空";
+  if (a.slides.some((s) => !s.title)) return "每页必须有 title";
+  return null;
+}
+
+/** commit_outline 落库：持久化 design_tokens/theme_css/style + 覆盖写 slides。 */
+async function persistOutline(
+  projectId: number,
+  parsed: unknown,
+  style: string | null
+): Promise<string> {
+  const a = parsed as {
+    design_tokens: Record<string, string>;
+    theme_css: string;
+    slides: OutlineSlide[];
+    style?: string;
+  };
+  const tokensJson = JSON.stringify(a.design_tokens, null, 2);
+  const resolvedStyle = a.style || style || null;
+  await updateProject(projectId, {
+    design_tokens: tokensJson,
+    theme_css: a.theme_css,
+    style: resolvedStyle,
+  });
+  for (const s of await listSlides(projectId)) {
+    if (s.id) await deleteSlide(s.id);
+  }
+  for (let i = 0; i < a.slides.length; i++) {
+    const s = a.slides[i];
+    await upsertSlide({
+      project_id: projectId,
+      sort: i,
+      title: s.title,
+      outline: JSON.stringify(s),
+      html_content: null,
+    });
+  }
+  return `已保存 ${a.slides.length} 页大纲`;
+}
+
 /**
  * 执行 Tavily 工具调用并记录用量。返回工具结果文本（供回填给模型）。
  * 异常时返回 [工具错误] 文本，不中断 agent loop。审计行（含积分）追加到 genState.reasoning。
@@ -359,41 +402,8 @@ export async function startOutline(
       systemPrompt: "你是专业 PPT 设计师，按要求调用 commit_outline 提交设计系统与全部页面大纲。",
       userPrompt: splitOutlinePrompt(topic, manuscript, style),
       requiredTool: outlineTool,
-      validate: (parsed) => {
-        const a = parsed as { slides?: OutlineSlide[] };
-        if (!a.slides || !a.slides.length) return "slides 不能为空";
-        if (a.slides.some((s) => !s.title)) return "每页必须有 title";
-        return null;
-      },
-      execTool: async (_c, parsed) => {
-        const a = parsed as {
-          design_tokens: Record<string, string>;
-          theme_css: string;
-          slides: OutlineSlide[];
-          style?: string;
-        };
-        const tokensJson = JSON.stringify(a.design_tokens, null, 2);
-        const resolvedStyle = a.style ?? style ?? null;
-        await updateProject(projectId, {
-          design_tokens: tokensJson,
-          theme_css: a.theme_css,
-          style: resolvedStyle,
-        });
-        for (const s of await listSlides(projectId)) {
-          if (s.id) await deleteSlide(s.id);
-        }
-        for (let i = 0; i < a.slides.length; i++) {
-          const s = a.slides[i];
-          await upsertSlide({
-            project_id: projectId,
-            sort: i,
-            title: s.title,
-            outline: JSON.stringify(s),
-            html_content: null,
-          });
-        }
-        return `已保存 ${a.slides.length} 页大纲`;
-      },
+      validate: validateOutline,
+      execTool: (_c, parsed) => persistOutline(projectId, parsed, style ?? null),
     });
     const slideCount = (r.parsedArgs as { slides: OutlineSlide[] }).slides.length;
     const label = toolLabel("commit_outline", r.parsedArgs);
@@ -444,41 +454,8 @@ export async function sendOutlineChat(
         "你是专业 PPT 设计师。根据用户指令修改大纲，调用 commit_outline 提交修改后的完整设计系统与全部页面（design_tokens/theme_css/slides/style）。每页必须保留 notes 字段，修改页面的同时维护 notes 与要点对齐。",
       userPrompt,
       requiredTool: outlineTool,
-      validate: (parsed) => {
-        const a = parsed as { slides?: OutlineSlide[] };
-        if (!a.slides || !a.slides.length) return "slides 不能为空";
-        if (a.slides.some((s) => !s.title)) return "每页必须有 title";
-        return null;
-      },
-      execTool: async (_c, parsed) => {
-        const a = parsed as {
-          design_tokens: Record<string, string>;
-          theme_css: string;
-          slides: OutlineSlide[];
-          style?: string;
-        };
-        const tokensJson = JSON.stringify(a.design_tokens, null, 2);
-        const resolvedStyle = a.style ?? style ?? null;
-        await updateProject(projectId, {
-          design_tokens: tokensJson,
-          theme_css: a.theme_css,
-          style: resolvedStyle,
-        });
-        for (const s of await listSlides(projectId)) {
-          if (s.id) await deleteSlide(s.id);
-        }
-        for (let i = 0; i < a.slides.length; i++) {
-          const s = a.slides[i];
-          await upsertSlide({
-            project_id: projectId,
-            sort: i,
-            title: s.title,
-            outline: JSON.stringify(s),
-            html_content: null,
-          });
-        }
-        return `已保存 ${a.slides.length} 页大纲`;
-      },
+      validate: validateOutline,
+      execTool: (_c, parsed) => persistOutline(projectId, parsed, style),
     });
     const slideCount = (r.parsedArgs as { slides: OutlineSlide[] }).slides.length;
     const label = toolLabel("commit_outline", r.parsedArgs);
