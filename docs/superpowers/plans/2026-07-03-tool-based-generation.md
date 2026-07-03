@@ -880,7 +880,6 @@ function makeCancelled(): CancelledError {
 在 `startOutline` 函数**之前**插入 `runToolPhase` 原语：
 ```ts
 import { extractStringArg } from "./toolUtils";
-import { toolLabel } from "./toolUtils";
 import type { ToolChoice } from "./chat";
 
 /**
@@ -1014,13 +1013,13 @@ export function manuscriptPrompt(topic: string): string {
 }
 ```
 
-- [ ] **Step 2: genStore import 加 manuscriptTool + toolUtils**
+- [ ] **Step 2: genStore import 加 manuscriptTool + toolLabel**
 
-`src/lib/genStore.ts` 现有 prompt import（`manuscriptPrompt, splitOutlinePrompt, ...`）行追加 `manuscriptTool`；并在 import 区加：
+`src/lib/genStore.ts` 现有 prompt import（`manuscriptPrompt, splitOutlinePrompt, ...`）行追加 `manuscriptTool`；并把 Task 6 加的 `import { extractStringArg } from "./toolUtils";` 改为：
 ```ts
 import { extractStringArg, toolLabel } from "./toolUtils";
 ```
-（若 Task 6 因 noUnusedLocals 未加此 import，本步加上。）
+（Task 7 起各阶段用 toolLabel 生成卡片 label；`noUnusedLocals:true` 下 Task 6 未导 toolLabel 正是为此。）
 
 - [ ] **Step 3: 替换 startOutline 文案子阶段**
 
