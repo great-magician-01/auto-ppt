@@ -237,7 +237,7 @@ export const tavilyTools: ToolDef[] = [
   },
 ];
 
-/** 调试模式选中元素修改：用户选中了一个元素，仅改该部分，返回整页 HTML。 */
+/** 调试模式选中元素修改：用户选中了一个元素，仅改该部分，调用 write_slide_html 提交整页 HTML。 */
 export function chatWithElementPrompt(args: {
   html: string;
   elementHtml: string;
@@ -247,7 +247,7 @@ export function chatWithElementPrompt(args: {
   return `这是当前页 HTML：
 ${args.html}
 
-用户用调试模式选中了页面中一个元素，仅改动该元素对应的部分，其余结构保持不变。返回修改后的完整 HTML 文档（<!DOCTYPE html>…</html>），不要 markdown 代码块、不要解释。
+用户用调试模式选中了页面中一个元素，仅改动该元素对应的部分，其余结构保持不变。先用一两句说明改动，再调用 write_slide_html 提交修改后的完整 HTML 文档（<!DOCTYPE html>…</html>）。
 
 选中元素 HTML：
 ${args.elementHtml}

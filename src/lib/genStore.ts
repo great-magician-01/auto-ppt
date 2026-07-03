@@ -712,7 +712,7 @@ export async function startAll(
   if (!genState.error && !genState.cancelled) genState.status = "全部页面已生成";
 }
 
-// 对话修改单页：预览实时流，完成写库 + 追加消息。
+// 对话修改单页：预览实时流（genState.artifact），完成写库 + 追加消息。
 export async function sendChat(
   projectId: number,
   slides: Slide[],
@@ -729,7 +729,7 @@ export async function sendChat(
   genState.phase = "chat";
   resetBuffers();
   try {
-    const userContent = element
+    const userPrompt = element
       ? chatWithElementPrompt({
           html: cur.html_content,
           elementHtml: element.html,
@@ -737,33 +737,33 @@ export async function sendChat(
           instruction,
         })
       : `这是当前页 HTML：\n${cur.html_content}\n\n用户修改指令：${instruction}`;
-    const msgs: ChatMsg[] = [
-      {
-        role: "system",
-        content:
-          "你是专业前端。根据用户指令修改给定的幻灯片 HTML，只输出修改后的完整 HTML 文档，不要任何解释文字。",
+    const r = await runToolPhase({
+      systemPrompt:
+        "你是专业前端。根据用户指令修改幻灯片，先用一两句说明改动，再调用 write_slide_html 提交修改后的完整 HTML 文档。",
+      userPrompt,
+      requiredTool: slideHtmlTool,
+      artifactField: "html",
+      validate: (parsed) => {
+        const html = (parsed as { html?: string }).html ?? "";
+        if (!/<html/i.test(html) || (!/\.slide\b/.test(html) && !/class="slide"/.test(html)))
+          return "HTML 必须是含 .slide 画布的完整文档";
+        return null;
       },
-      { role: "user", content: userContent },
-    ];
-    await chat(
-      msgs,
-      (d) => {
-        genState.content += d;
-        cur.html_content = cleanHtml(genState.content);
-        genState.status = `修改中… 已收到 ${genState.content.length} 字`;
+      execTool: async (_c, parsed) => {
+        cur.html_content = cleanHtml((parsed as { html: string }).html);
+        await upsertSlide(cur);
+        return "已更新当前页";
       },
-      (d) => {
-        genState.reasoning += d;
-        genState.status = `思考中… 已收到 ${genState.reasoning.length} 字思考`;
-      }
+    });
+    const label = toolLabel("write_slide_html", r.parsedArgs, { index: idx });
+    await addMessage(
+      projectId,
+      "assistant",
+      r.nlText || "已按指令更新当前页",
+      cur.id,
+      genState.reasoning,
+      JSON.stringify({ name: "write_slide_html", label })
     );
-    if (genState.cancelled) {
-      genState.status = "已取消";
-      return;
-    }
-    cur.html_content = cleanHtml(genState.content);
-    await upsertSlide(cur);
-    await addMessage(projectId, "assistant", "已按指令更新当前页", cur.id, genState.reasoning);
     genState.status = "已更新";
   } catch (e) {
     if (isCancelled(e)) {
