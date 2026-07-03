@@ -10,9 +10,11 @@ import {
   presetToPromptText,
   STYLE_PRESETS,
 } from "./styles";
+import type { ToolDef } from "./chat";
 
-export function outlinePrompt(
+export function splitOutlinePrompt(
   topic: string,
+  manuscript: string,
   style?: string | null
 ): string {
   const styleMode = stylesForPrompt(style);
@@ -26,9 +28,12 @@ export function outlinePrompt(
     styleReturnClause = `\n4. style：你在上面挑选的风格 id（字符串）。`;
   }
 
-  return `你是一位专业的 PPT 设计师与信息架构师。请为主题「${topic}」设计一份精美的 PPT，先确定统一的设计系统，再给出每页大纲。${styleSection}
+  return `你是一位专业的 PPT 设计师与信息架构师。下面是已经撰写好的完整文案，请据此为主题「${topic}」设计一份精美的 PPT：先确定统一的设计系统，再把文案拆分为各页大纲。${styleSection}
 
-【页数】由你根据主题内容的丰富程度自行判断决定：内容丰富的主题可多到 20 页以上，简单的主题可少至 6 页左右，以“每页都有实质信息、不空洞、不冗余”为原则。不要固定页数，也不要为了凑数而堆砌页或拆得过碎。
+【完整文案（作为内容源，拆页时必须覆盖其要点）】
+${manuscript}
+
+【页数】由你根据文案内容的丰富程度自行判断决定：内容丰富的主题可多到 20 页以上，简单的主题可少至 6 页左右，以“每页都有实质信息、不空洞、不冗余”为原则。不要固定页数，也不要为了凑数而堆砌页或拆得过碎。
 
 【输出要求】
 1. design_tokens：专业协调的配色与字体方案，字段为 primary / accent / background / surface / text / textMuted / fonts / titleSize / bodySize（颜色用 #hex；titleSize 72–96px、bodySize 32–44px，必须保证投影可读，禁止偏小）。字体用系统通用字体族（如 "Microsoft YaHei"/"PingFang SC"/sans-serif 或 monospace），不要依赖需联网加载的字体。
@@ -38,18 +43,19 @@ export function outlinePrompt(
    - :root 中的字号变量必须使用 clamp() 实现弹性，如 --titleSize: clamp(56px, 5vw, 96px); --bodySize: clamp(24px, 2vw, 40px); 确保内容多时自动缩小，但正文最小不低于 20px
    - 所有直接子内容容器（如 .content、.grid、.columns、.cards）必须允许弹性收缩：使用 min-height:0; flex-shrink:1; overflow:visible（不要加 overflow:hidden，否则截图时隐藏内容会丢失）
    - 文本容器必须设置合理的 max-height（如 calc(100% - 标题高度)）配合 overflow:visible，确保所有文本在截图时完整可见
-3. slides：数组，第一页 kind=cover（封面），最后一页 kind=ending（致谢），中间用 cover/bullets/two-column/quote/section 等版式。每页含 title（标题）、kind（版式）、bullets（要点字符串数组）。中间内容页 bullets 至少 4 条，每条应是一个有信息量的完整要点（可含简短支撑说明、数据或案例），内容充实专业、紧扣主题展开；封面/致谢可短。${styleReturnClause}
+3. slides：数组，第一页 kind=cover（封面），最后一页 kind=ending（致谢），中间用 cover/bullets/two-column/quote/section 等版式。每页含 title（标题）、kind（版式）、bullets（要点字符串数组）、notes（该页讲稿片段，从对应文案摘取，演讲用，1–3 句或对应要点）。中间内容页 bullets 至少 4 条，每条应是一个有信息量的完整要点（可含简短支撑说明、数据或案例），内容充实专业、紧扣主题展开；封面/致谢可短。${styleReturnClause}
 
 内容要专业、充实、紧扣主题，避免空洞。
 
 【严格】只返回一个 JSON 对象，不要 markdown 代码块、不要解释文字。结构如下：
-{"design_tokens":{...},"theme_css":"/* css string */","slides":[{"title":"","kind":"cover","bullets":[]}...],"style":"<风格id，仅自动模式需要>"}`;
+{"design_tokens":{...},"theme_css":"/* css string */","slides":[{"title":"","kind":"cover","bullets":[],"notes":""}...],"style":"<风格id，仅自动模式需要>"}`;
 }
 
 export interface OutlineSlide {
   title: string;
   kind: string;
   bullets: string[];
+  notes?: string;
 }
 
 export function slideHtmlPrompt(args: {
@@ -176,6 +182,56 @@ ${html}
 【输出】只输出完整 HTML 文档（<!DOCTYPE html>…</html>），不要 markdown 代码块、不要解释。若页面无明显硬伤，必须原样返回上面那段 HTML（一字不改）。`;
 }
 
+
+/** 文案阶段提示词：先调研再撰写，最终消息只输出完整 markdown 文案。 */
+export function manuscriptPrompt(topic: string): string {
+  return `你是一位专业的 PPT 文案策划与演讲撰稿人。请为主题「${topic}」撰写一份完整的 PPT 演讲文案。
+
+【工作方式】
+- 你可以调用工具联网调研：先用 tavily_search 查证关键事实、数据、最新进展；对某个想看全文的网页再用 tavily_extract 提取。
+- 调研充分后再撰写。不要每次都调用工具，也不要只搜一次就停——根据主题需要决定调用次数。
+- 引用工具查到的信息时，在文案中以 [来源: 标题] 标注；不确定或查不到的不要编造。
+
+【文案要求】
+- 最终消息只输出一份完整的 markdown 文案，不要输出调研过程、工具调用摘要或任何解释。
+- 按 8–20 页分章节，每章节有：章节标题 + 该页要讲的内容（要点/数据/案例/过渡语）。
+- 内容专业、充实、紧扣主题、适合宣讲；语言自然流畅，可作为演讲稿。
+- 用 markdown 的二级标题（##）分页，标题下写该页讲什么。
+
+现在开始，必要时调用工具调研，最后输出完整文案。`;
+}
+
+/** Tavily 工具定义（随 manuscript 调用注入）。 */
+export const tavilyTools: ToolDef[] = [
+  {
+    name: "tavily_search",
+    description:
+      "用关键词联网搜索，返回一个 LLM 生成的摘要答案 + 多条结果（每条含 title/url/content）。需要查证事实、数据、最新信息时调用。",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "搜索关键词" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "tavily_extract",
+    description:
+      "提取指定网页的完整内容（markdown 格式）。当某个搜索结果想看全文时调用。一次最多 3 个 URL。",
+    parameters: {
+      type: "object",
+      properties: {
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "要提取全文的 URL 列表，最多 3 个",
+        },
+      },
+      required: ["urls"],
+    },
+  },
+];
 
 /** 调试模式选中元素修改：用户选中了一个元素，仅改该部分，返回整页 HTML。 */
 export function chatWithElementPrompt(args: {

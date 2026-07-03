@@ -60,6 +60,17 @@ export async function exportPptx(
     const dataUrl = await renderSlideToDataUrl(slide.html_content);
     const s = pptx.addSlide();
     s.addImage({ data: dataUrl, x: 0, y: 0, w: 13.333, h: 7.5 });
+    // 讲者备注：解析 outline JSON 取 notes（文案先行流程才有）
+    if (slide.outline) {
+      try {
+        const ol = JSON.parse(slide.outline) as { notes?: string };
+        if (ol.notes && ol.notes.trim()) {
+          s.addNotes(ol.notes);
+        }
+      } catch {
+        /* outline 非合法 JSON 时忽略备注 */
+      }
+    }
   }
 
   const result = (await pptx.write({ outputType: "blob" })) as Blob;

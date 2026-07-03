@@ -12,6 +12,15 @@ import {
   setSetting,
   type AiConfig,
 } from "../lib/aiConfig";
+import {
+  getTavilyKey,
+  setTavilyKey,
+  tavilySearch,
+  getTavilyUsage,
+  resetTavilyUsage,
+  recordTavilySearch,
+  type TavilyUsage,
+} from "../lib/tavily";
 import Icon from "../components/Icon.vue";
 
 const CUSTOM = "__custom__";
@@ -69,6 +78,7 @@ watch(
 onMounted(async () => {
   await load();
   autoSelfcheck.value = (await getSetting("auto_selfcheck")) !== "false";
+  await loadTavily();
 });
 
 async function load() {
@@ -158,6 +168,49 @@ async function remove(c: AiConfig) {
 async function toggleAutoSelfcheck(v: boolean) {
   autoSelfcheck.value = v;
   await setSetting("auto_selfcheck", v ? "true" : "false");
+}
+
+// Tavily 联网搜索
+const tavilyKey = ref("");
+const testing = ref(false);
+const tavilyUsage = ref<TavilyUsage>({ searchCalls: 0, extractCalls: 0, extractUrls: 0, credits: 0 });
+
+async function loadTavily() {
+  tavilyKey.value = (await getTavilyKey()) ?? "";
+  tavilyUsage.value = await getTavilyUsage();
+}
+
+async function saveTavilyKey() {
+  await setTavilyKey(tavilyKey.value.trim());
+  await loadTavily();
+  saved.value = true;
+  setTimeout(() => (saved.value = false), 2000);
+}
+
+async function testTavily() {
+  const key = tavilyKey.value.trim();
+  if (!key) {
+    alert("请先填写并保存 Tavily API Key");
+    return;
+  }
+  await setTavilyKey(key);
+  testing.value = true;
+  try {
+    const r = await tavilySearch(key, "test query");
+    await recordTavilySearch(r.credits);
+    await loadTavily();
+    alert(`测试成功：返回 ${r.results.length} 条结果，消耗 ${r.credits} 积分`);
+  } catch (e: any) {
+    alert("测试失败：" + e);
+  } finally {
+    testing.value = false;
+  }
+}
+
+async function clearUsage() {
+  if (!confirm("清零 Tavily 用量统计？")) return;
+  await resetTavilyUsage();
+  await loadTavily();
 }
 </script>
 
@@ -280,6 +333,32 @@ async function toggleAutoSelfcheck(v: boolean) {
       <div class="row">
         <button class="primary" @click="save">保存</button>
         <span v-if="saved" class="muted">已保存</span>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 24px">联网搜索 (Tavily)</h3>
+    <p class="muted">配置 Tavily API Key 后，新建项目时可选「联网搜索」，生成文案时由 AI 自主多轮联网调研。</p>
+    <label>
+      Tavily API Key
+      <div class="key-row">
+        <input v-model="tavilyKey" :type="showKey ? 'text' : 'password'" placeholder="tvly-..." />
+        <button class="ghost icon-btn" type="button" @click="showKey = !showKey">
+          <Icon :name="showKey ? 'eye-off' : 'eye'" :size="16" />
+        </button>
+      </div>
+    </label>
+    <div class="row">
+      <button class="primary" @click="saveTavilyKey">保存 Key</button>
+      <button class="ghost" :disabled="testing || !tavilyKey.trim()" @click="testTavily">
+        {{ testing ? "测试中…" : "测试连接" }}
+      </button>
+      <span v-if="saved" class="muted">已保存</span>
+    </div>
+    <div class="field">
+      <span class="label">用量</span>
+      <div class="muted">
+        搜索 {{ tavilyUsage.searchCalls }} 次 · 提取 {{ tavilyUsage.extractCalls }} 次（{{ tavilyUsage.extractUrls }} URL）· 已用 {{ tavilyUsage.credits }} 积分
+        <button class="ghost" style="margin-left: 8px" @click="clearUsage">清零</button>
       </div>
     </div>
   </div>

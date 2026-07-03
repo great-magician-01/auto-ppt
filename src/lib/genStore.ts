@@ -1,13 +1,15 @@
 import { reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { chat, chatOnce, type ChatMsg, type CancelledError } from "./chat";
+import { chat, chatOnce, chatAgent, type ChatMsg, type CancelledError, type ToolCall } from "./chat";
 import {
-  outlinePrompt,
+  manuscriptPrompt,
+  splitOutlinePrompt,
   slideHtmlPrompt,
   parseOutline,
   cleanHtml,
   selfCheckPrompt,
   chatWithElementPrompt,
+  tavilyTools,
   type OutlineSlide,
 } from "./prompt";
 import {
@@ -20,6 +22,13 @@ import {
   type Slide,
 } from "./db";
 import { getActiveAi, getSetting } from "./aiConfig";
+import {
+  getTavilyKey,
+  tavilySearch,
+  tavilyExtract,
+  recordTavilySearch,
+  recordTavilyExtract,
+} from "./tavily";
 import { renderSlideToDataUrl } from "./ppt";
 
 // 全局生成 store：生成过程（大纲/单页/对话/自检）的唯一真相源。
@@ -27,6 +36,7 @@ import { renderSlideToDataUrl } from "./ppt";
 
 export type GenPhase =
   | "idle"
+  | "manuscript"
   | "outline"
   | "outline-chat"
   | "slide"
@@ -67,28 +77,171 @@ export async function cancelGeneration(): Promise<void> {
   }
 }
 
-// 阶段1：生成大纲 + 设计系统（JSON 模式，解析失败自动重试一次）。写库后回填 style。
+/**
+ * 执行 Tavily 工具调用并记录用量。返回工具结果文本（供回填给模型）。
+ * 异常时返回 [工具错误] 文本，不中断 agent loop。审计行（含积分）追加到 genState.reasoning。
+ */
+async function execTavilyTool(call: ToolCall, apiKey: string): Promise<string> {
+  let args: { query?: string; urls?: string[] } = {};
+  try {
+    args = JSON.parse(call.arguments);
+  } catch {
+    return "[工具错误] 参数解析失败";
+  }
+  try {
+    if (call.name === "tavily_search") {
+      const q = args.query ?? "";
+      if (!q) return "[工具错误] 缺少 query";
+      const r = await tavilySearch(apiKey, q);
+      await recordTavilySearch(r.credits);
+      genState.reasoning += `\n[🔍 搜索] ${q} · +${r.credits} 积分 → ${r.results.length} 条`;
+      const lines = r.results.map(
+        (x) => `## ${x.title}\nURL: ${x.url}\n${x.content}`
+      );
+      return `摘要答案：${r.answer}\n\n${lines.join("\n\n")}\n\n[本次消耗 ${r.credits} 积分]`;
+    }
+    if (call.name === "tavily_extract") {
+      const urls = args.urls ?? [];
+      if (!urls.length) return "[工具错误] 缺少 urls";
+      const r = await tavilyExtract(apiKey, urls);
+      await recordTavilyExtract(r.credits, r.results.length);
+      genState.reasoning += `\n[📄 提取] ${urls.join(", ")} · +${r.credits} 积分`;
+      const lines = r.results.map(
+        (x) => `## ${x.url}\n${x.raw_content}`
+      );
+      return `${lines.join("\n\n")}\n\n[本次消耗 ${r.credits} 积分]`;
+    }
+    return `[工具错误] 未知工具 ${call.name}`;
+  } catch (e) {
+    return `[工具错误] ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+// 阶段1a：生成完整文案（联网时用工具调研）；阶段1b：按文案拆页（JSON 模式）。
 export async function startOutline(
   projectId: number,
   topic: string,
-  style?: string | null
+  style?: string | null,
+  searchEnabled = false
 ): Promise<void> {
   genState.projectId = projectId;
   genState.running = true;
-  genState.phase = "outline";
+  genState.phase = "manuscript";
   resetBuffers();
-  let parsed: ReturnType<typeof parseOutline> | null = null;
-  let lastErr: unknown = null;
+  let manuscript = "";
   try {
+    // —— 文案阶段 ——
+    // 若项目已有完整文案（如上次拆页失败/取消但文案已存），跳过调研直接复用
+    const proj = await getProject(projectId);
+    if (proj?.manuscript) {
+      manuscript = proj.manuscript;
+      genState.status = "已有完整文案（" + manuscript.length + " 字），跳过调研直接拆分大纲…";
+      genState.content = manuscript; // 让 UI 可见
+    } else {
+    let useSearch = searchEnabled;
+    let apiKey: string | null = null;
+    if (useSearch) {
+      apiKey = await getTavilyKey();
+      if (!apiKey) {
+        useSearch = false;
+        genState.status = "未配置 Tavily Key，离线生成文案…";
+      }
+    }
     const msgs: ChatMsg[] = [
-      { role: "system", content: "你是专业 PPT 设计师，严格按要求返回 JSON。" },
-      { role: "user", content: outlinePrompt(topic, style) },
+      { role: "system", content: "你是专业 PPT 文案策划，严格按要求输出。" },
+      { role: "user", content: manuscriptPrompt(topic) },
     ];
+    if (useSearch && apiKey) {
+      genState.status = "联网调研并撰写文案…";
+      try {
+        manuscript = await chatAgent(
+          msgs,
+          tavilyTools,
+          (call) => execTavilyTool(call, apiKey!),
+          (d) => {
+            genState.content += d;
+            genState.status = `撰写文案中… 已收到 ${genState.content.length} 字`;
+          },
+          (d) => {
+            genState.reasoning += d;
+          },
+          () => {
+            // 每轮开始清空 content（只留最终轮文案）
+            genState.content = "";
+          },
+          undefined, // limits (default)
+          () => genState.cancelled
+        );
+      } catch (e) {
+        if (isCancelled(e)) throw e;
+        // 模型不支持工具/格式不支持 → 降级离线写文案（用 chat 让 UI 见实时流）
+        genState.status = "联网搜索不可用，改为离线生成文案…";
+        genState.content = "";
+        manuscript = "";
+        await chat(
+          msgs,
+          (d) => {
+            manuscript += d;
+            genState.content += d;
+            genState.status = `撰写文案中… 已收到 ${genState.content.length} 字`;
+          },
+          (d) => {
+            genState.reasoning += d;
+          }
+        );
+      }
+    } else {
+      genState.status = "撰写文案中…";
+      manuscript = "";
+      await chat(
+        msgs,
+        (d) => {
+          manuscript += d;
+          genState.content += d;
+          genState.status = `撰写文案中… 已收到 ${genState.content.length} 字`;
+        },
+        (d) => {
+          genState.reasoning += d;
+        }
+      );
+    }
+    if (genState.cancelled) {
+      genState.status = "已取消";
+      return;
+    }
+    manuscript = manuscript || genState.content;
+    if (!manuscript.trim()) {
+      // 模型最终轮只产出工具调用而无文本，或返回空：文案先行流程无内容可拆页，直接报错
+      // （不写空 manuscript、不进入拆页阶段，避免凭主题凭空生成空洞大纲）
+      throw new Error("文案生成失败：模型未产出任何文案内容，请重试或调整主题。");
+    }
+    await updateProject(projectId, { manuscript });
+    await addMessage(
+      projectId,
+      "assistant",
+      `已生成完整文案（${manuscript.length} 字）。`,
+      null,
+      genState.reasoning
+    );
+    } // 结束 if (proj?.manuscript) else 分支
+
+    // —— 拆页阶段 ——
+    if (genState.cancelled) {
+      genState.status = "已取消";
+      return;
+    }
+    genState.phase = "outline";
+    resetBuffers();
+    let parsed: ReturnType<typeof parseOutline> | null = null;
+    let lastErr: unknown = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       if (genState.cancelled) break;
-      genState.status = `生成大纲与设计系统（第 ${attempt} 次）…`;
+      genState.status = `按文案拆分大纲（第 ${attempt} 次）…`;
       const raw = await chatOnce(
-        msgs,
+        [
+          { role: "system", content: "你是专业 PPT 设计师，严格按要求返回 JSON。" },
+          { role: "user", content: splitOutlinePrompt(topic, manuscript, style) },
+        ],
         (d) => {
           genState.reasoning += d;
           genState.status = `思考中… 已收到 ${genState.reasoning.length} 字思考`;
@@ -121,7 +274,7 @@ export async function startOutline(
       style: resolvedStyle,
     });
 
-    // 覆盖写 slides：先删旧再插新
+    // 覆盖写 slides：先删旧再插新（每页 outline JSON 含 notes）
     for (const s of await listSlides(projectId)) {
       if (s.id) await deleteSlide(s.id);
     }
@@ -162,7 +315,8 @@ export async function sendOutlineChat(
   topic: string,
   style: string | null,
   currentSlides: OutlineSlide[],
-  instruction: string
+  instruction: string,
+  manuscript?: string | null
 ): Promise<void> {
   genState.projectId = projectId;
   genState.running = true;
@@ -173,12 +327,12 @@ export async function sendOutlineChat(
       {
         role: "system",
         content:
-          "你是专业 PPT 设计师。根据用户指令修改给定的大纲 JSON，只返回修改后的完整 JSON 对象（结构同生成阶段：design_tokens/theme_css/slides[/style]），不要 markdown 代码块、不要任何解释文字。",
+          "你是专业 PPT 设计师。根据用户指令修改给定的大纲 JSON，只返回修改后的完整 JSON 对象（结构同生成阶段：design_tokens/theme_css/slides[/style]），不要 markdown 代码块、不要任何解释文字。每页必须保留 notes 字段（讲稿片段），不可省略或清空；修改页面的同时维护 notes 与对应要点对齐。",
       },
       {
         role: "user",
         content:
-          `主题：${topic}\n\n当前大纲 JSON：\n${JSON.stringify(
+          `主题：${topic}${manuscript ? `\n\n【完整文案（供参考，修改大纲时确保覆盖文案要点）】\n${manuscript}` : ""}\n\n当前大纲 JSON：\n${JSON.stringify(
             { slides: currentSlides },
             null,
             2

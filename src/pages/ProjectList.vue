@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { listProjects, createProject, getFirstSlide } from "../lib/db";
 import { STYLE_PRESETS } from "../lib/styles";
 import { genState } from "../lib/genStore";
+import { getTavilyKey } from "../lib/tavily";
 import type { Project } from "../lib/db";
 import Icon from "../components/Icon.vue";
 import SlidePreview from "../components/SlidePreview.vue";
@@ -15,10 +16,15 @@ const showNew = ref(false);
 const title = ref("");
 const topic = ref("");
 const selectedStyle = ref<string | null>(null);
+const tavilyReady = ref(false);
+const searchEnabled = ref(true);
 // 全局生成锁：genState 单例 running 时禁止新建项目（避免并发破坏单例状态）
 const busy = computed(() => genState.running);
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  tavilyReady.value = !!(await getTavilyKey());
+});
 
 async function load() {
   projects.value = await listProjects();
@@ -36,7 +42,12 @@ async function create() {
   if (genState.running) return; // 兜底：生成中不新建
   if (!topic.value.trim()) return;
   const t = title.value.trim() || topic.value.slice(0, 20);
-  const id = await createProject(t, topic.value.trim(), selectedStyle.value);
+  const id = await createProject(
+    t,
+    topic.value.trim(),
+    selectedStyle.value,
+    tavilyReady.value && searchEnabled.value
+  );
   router.push(`/outline/${id}`);
 }
 
@@ -92,6 +103,12 @@ function open(p: Project) {
               {{ s.name }}
             </button>
           </div>
+        </div>
+        <div v-if="tavilyReady" class="field">
+          <label class="toggle">
+            <input type="checkbox" v-model="searchEnabled" />
+            联网搜索（生成文案时由 AI 自主联网调研）
+          </label>
         </div>
         <button class="primary" :disabled="busy || !topic.trim()" @click="create">
           创建并生成大纲
@@ -208,5 +225,16 @@ label {
 .card-thumb :deep(.preview-wrap) {
   border: none;
   border-radius: 6px;
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toggle input {
+  margin: 0;
 }
 </style>
