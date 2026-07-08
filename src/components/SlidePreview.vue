@@ -173,6 +173,7 @@ watch(() => props.inspectMode, () => {
         v-if="displayHtml"
         ref="iframeEl"
         :srcdoc="displayHtml"
+        sandbox="allow-same-origin"
         :style="{ background: iframeBg }"
         @load="attachInspector"
       />

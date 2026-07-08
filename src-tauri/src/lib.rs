@@ -287,6 +287,7 @@ async fn chat_stream(
     messages: Vec<ChatMessage>,
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
     let is_anthropic = config.format == "anthropic";
@@ -561,6 +562,7 @@ async fn tavily_search(
     query: String,
 ) -> Result<TavilySearchResult, String> {
     let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
     let body = serde_json::json!({
@@ -627,6 +629,7 @@ async fn tavily_extract(
     urls: Vec<String>,
 ) -> Result<TavilyExtractResult, String> {
     let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
     let body = serde_json::json!({
@@ -701,6 +704,7 @@ struct ModelsConfig {
 #[tauri::command]
 async fn list_models(config: ModelsConfig) -> Result<Vec<String>, String> {
     let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
     let is_anthropic = config.format == "anthropic";

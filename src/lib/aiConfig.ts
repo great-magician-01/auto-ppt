@@ -115,9 +115,11 @@ export async function deleteAiConfig(id: number): Promise<void> {
 
 export async function setActiveAi(id: number): Promise<void> {
   const d = await db();
-  // 单选：先全置 0 再置目标 1（两句同一连接，近似事务）
-  await d.execute("UPDATE ai_configs SET enabled = 0");
-  await d.execute("UPDATE ai_configs SET enabled = 1 WHERE id = ?", [id]);
+  // 单选：一条 CASE 语句原子完成“全置 0、目标置 1”，避免两句之间崩溃导致无可用 AI
+  await d.execute(
+    "UPDATE ai_configs SET enabled = CASE WHEN id = ? THEN 1 ELSE 0 END",
+    [id]
+  );
 }
 
 export async function getModelsCache(id: number): Promise<string[]> {

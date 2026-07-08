@@ -22,6 +22,9 @@ export async function renderSlideToDataUrl(html: string): Promise<string> {
   host.style.cssText = "position:fixed;left:-99999px;top:0;width:0;height:0;overflow:hidden;";
   document.body.appendChild(host);
   const iframe = document.createElement("iframe");
+  // sandbox 禁止脚本执行（LLM 产物可能含 <script>，同源 srcdoc 会威胁 app origin），
+  // 保留 allow-same-origin 以便父文档访问 contentDocument 做截图与样式读取
+  iframe.setAttribute("sandbox", "allow-same-origin");
   iframe.style.cssText = `width:${SLIDE_W}px;height:${SLIDE_H}px;border:0;background:#ffffff;`;
   host.appendChild(iframe);
   try {
