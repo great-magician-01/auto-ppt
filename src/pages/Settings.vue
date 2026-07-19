@@ -366,8 +366,12 @@ async function clearUsage() {
 
 <style scoped>
 .page {
-  padding: 24px;
-  max-width: 640px;
+  padding: 28px;
+  max-width: 680px;
+}
+.page h2 {
+  font-size: 20px;
+  letter-spacing: 0.3px;
 }
 .list {
   display: flex;
@@ -379,15 +383,22 @@ async function clearUsage() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   gap: 8px;
+  transition: all 0.15s ease;
+}
+.cfg-row:hover {
+  border-color: #c3cdf5;
 }
 .cfg-row.active {
   border-color: var(--primary);
-  background: #eef;
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 .cfg-info {
   display: flex;
@@ -400,9 +411,15 @@ async function clearUsage() {
 }
 .badge {
   font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: #eee;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #eef0f3;
+  color: var(--muted);
+}
+.badge.openai {
+  background: #e7f0fe;
+  color: #1c64d9;
 }
 .badge.anthropic {
   background: #f3e8ff;
@@ -423,6 +440,11 @@ async function clearUsage() {
 .form {
   gap: 16px;
   margin-top: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  padding: 18px;
 }
 label {
   display: flex;
@@ -461,11 +483,13 @@ label {
 button.ghost {
   padding: 6px 12px;
   white-space: nowrap;
+  box-shadow: none;
 }
 code {
-  background: #eee;
-  padding: 1px 5px;
-  border-radius: 4px;
+  background: #eef0f3;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 12px;
 }
 .key-row {
   display: flex;

@@ -64,9 +64,9 @@ defineExpose({ prepend });
   <aside class="chat-panel">
     <div class="chat-list" ref="listEl">
       <div v-for="m in messages" :key="m.id ?? m.content" class="msg" :class="m.role">
-        <span class="role">{{ m.role }}</span>
+        <span class="role">{{ m.role === "user" ? "我" : "AI" }}</span>
         <div v-if="m.role === 'assistant'" class="md" v-html="renderMd(m.content)"></div>
-        <div v-else>{{ m.content }}</div>
+        <div v-else class="bubble">{{ m.content }}</div>
         <!-- 工具调用卡片：工具调用产物阶段回填的 {name,label} -->
         <details v-if="m.role === 'assistant' && toolLabelOf(m)" class="msg-tool">
           <summary>{{ toolLabelOf(m) }}</summary>
@@ -106,28 +106,43 @@ defineExpose({ prepend });
   display: flex;
   flex-direction: column;
   height: 100%;
+  background: var(--panel);
   border-left: 1px solid var(--border);
 }
 .chat-list {
   flex: 1;
   overflow: auto;
-  padding: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 .msg {
   font-size: 13px;
 }
 .msg .role {
   font-size: 11px;
+  font-weight: 600;
   color: var(--muted);
-  text-transform: uppercase;
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 .msg.assistant .role {
   color: var(--primary);
+}
+.msg .bubble {
+  background: #f0f2f5;
+  border-radius: 4px 12px 12px 12px;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  display: inline-block;
+}
+.msg.thinking {
+  background: var(--primary-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 .msg.thinking .role {
   color: var(--primary);
@@ -151,6 +166,10 @@ defineExpose({ prepend });
   cursor: pointer;
   color: var(--muted);
   font-size: 11px;
+  transition: color 0.15s ease;
+}
+.msg-reasoning summary:hover {
+  color: var(--primary);
 }
 .msg-reasoning pre {
   white-space: pre-wrap;
@@ -164,10 +183,18 @@ defineExpose({ prepend });
 }
 .chat-input {
   border-top: 1px solid var(--border);
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.chat-input textarea {
+  border-radius: 10px;
+  resize: vertical;
+  min-height: 64px;
+}
+.chat-input button {
+  align-self: flex-end;
 }
 .msg.assistant .md {
   font-size: 13px;
@@ -200,10 +227,15 @@ defineExpose({ prepend });
 .msg-tool summary {
   cursor: pointer;
   font-size: 12px;
+  font-weight: 600;
   color: var(--primary);
-  background: #eef;
+  background: var(--primary-soft);
   display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+.msg-tool summary:hover {
+  background: #dfe7ff;
 }
 </style>

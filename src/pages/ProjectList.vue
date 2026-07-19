@@ -135,7 +135,13 @@ function open(p: Project) {
 
 <style scoped>
 .page {
-  padding: 24px;
+  padding: 28px;
+  max-width: 1160px;
+  margin: 0 auto;
+}
+.page h2 {
+  font-size: 20px;
+  letter-spacing: 0.3px;
 }
 .lock-hint {
   margin: 8px 0 0;
@@ -144,8 +150,9 @@ function open(p: Project) {
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  padding: 18px;
   margin: 16px 0;
 }
 label {
@@ -157,25 +164,30 @@ label {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
+  gap: 18px;
+  margin-top: 18px;
 }
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px;
+  border-radius: 12px;
+  padding: 12px 14px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.18s ease;
 }
 .card:hover {
-  border-color: var(--primary);
+  border-color: #c3cdf5;
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
 }
 .card-title {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .card-topic {
-  margin-top: 6px;
+  margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -183,6 +195,11 @@ label {
 .card-time {
   margin-top: 8px;
   font-size: 11px;
+}
+.empty {
+  text-align: center;
+  padding: 72px 0;
+  font-size: 14px;
 }
 .field {
   display: flex;
@@ -200,21 +217,27 @@ label {
 }
 .chip {
   font-size: 13px;
-  padding: 4px 10px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  box-shadow: none;
   white-space: nowrap;
+}
+.chip:hover:not(:disabled) {
+  background: var(--primary-soft);
 }
 .chip.active {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+  box-shadow: 0 1px 3px rgba(59, 91, 219, 0.35);
 }
 .card-thumb {
   width: 100%;
   aspect-ratio: 16 / 9;
-  margin-bottom: 8px;
-  border-radius: 6px;
+  margin-bottom: 10px;
+  border-radius: 8px;
   overflow: hidden;
-  background: #f7f8fa;
+  background: #eef0f3;
 }
 .thumb-empty {
   display: flex;
@@ -224,7 +247,7 @@ label {
 }
 .card-thumb :deep(.preview-wrap) {
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 .toggle {
   display: inline-flex;

@@ -192,18 +192,20 @@ function goEditor() {
 }
 .stream .label {
   font-size: 12px;
+  font-weight: 600;
   color: var(--muted);
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 .stream pre {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 12px;
-  background: #f7f8fa;
-  padding: 10px;
-  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: 10px;
   margin: 0;
   max-height: 360px;
   overflow: auto;
@@ -211,28 +213,43 @@ function goEditor() {
 .outline-cards {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 .ocard {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 14px 16px;
   background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease;
+}
+.ocard:hover {
+  box-shadow: var(--shadow-md);
 }
 .ocard .num {
   font-weight: 700;
-  color: var(--muted);
+  font-size: 12px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .ocard .kind {
   font-size: 11px;
-  background: #eef;
+  font-weight: 600;
+  background: var(--primary-soft);
   color: var(--primary);
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
 }
 .ocard .otitle {
   font-weight: 600;
-  margin: 6px 0;
+  font-size: 15px;
+  margin: 8px 0 6px;
 }
 .ocard ul {
   margin: 0;
@@ -240,22 +257,37 @@ function goEditor() {
 }
 .ocard li {
   font-size: 13px;
+  line-height: 1.7;
+}
+.ocard li::marker {
+  color: var(--primary);
 }
 .danger {
   background: #e03131;
   color: #fff;
   border-color: #e03131;
+  box-shadow: 0 1px 3px rgba(224, 49, 49, 0.35);
+}
+.danger:hover:not(:disabled) {
+  background: #c92a2a;
+  border-color: #c92a2a;
+  color: #fff;
 }
 .manuscript-block {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 12px;
+  padding: 12px 14px;
   background: var(--panel);
-  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 14px;
 }
 .manuscript-block summary {
   font-weight: 600;
   cursor: pointer;
+  transition: color 0.15s ease;
+}
+.manuscript-block summary:hover {
+  color: var(--primary);
 }
 .manuscript-block pre {
   white-space: pre-wrap;

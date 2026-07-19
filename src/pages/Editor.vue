@@ -214,7 +214,7 @@ async function doExport() {
           <span class="num">{{ i + 1 }}</span>
           <div class="col">
             <span class="t">{{ s.title || "(未命名)" }}</span>
-            <span class="muted" :class="{ 'is-gen': i === generatingIdx }">
+            <span class="muted" :class="{ 'is-gen': i === generatingIdx, 'is-done': i !== generatingIdx && s.html_content }">
               <span v-if="i === generatingIdx" class="pulse" aria-hidden="true"></span>
               {{ i === generatingIdx ? genBadge : s.html_content ? "已生成" : "待生成" }}
             </span>
@@ -269,6 +269,9 @@ async function doExport() {
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
+.e-header h3 {
+  font-size: 15px;
+}
 .e-body {
   flex: 1;
   display: grid;
@@ -277,22 +280,35 @@ async function doExport() {
 }
 .e-list {
   border-right: 1px solid var(--border);
+  background: var(--panel);
   overflow: auto;
-  padding: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 6px;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 .item:hover {
-  background: #f0f1f3;
+  background: #f0f2f5;
 }
 .item.active {
-  background: #e8edff;
+  background: var(--primary-soft);
+}
+.item.active .num {
+  background: var(--primary);
+  color: #fff;
+}
+.item.active .t {
+  color: var(--primary);
+  font-weight: 600;
 }
 /* 正在生成的页：琥珀色高亮 + 左侧色条，与蓝色选中态区分，显眼可辨 */
 .item.generating {
@@ -308,6 +324,9 @@ async function doExport() {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+.muted.is-done {
+  color: #2f9e44;
 }
 .pulse {
   width: 8px;
@@ -330,8 +349,17 @@ async function doExport() {
 }
 .num {
   font-weight: 700;
+  font-size: 11px;
   color: var(--muted);
-  width: 18px;
+  background: #f0f2f5;
+  border-radius: 6px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
 }
 .item .t {
   font-size: 13px;
@@ -340,6 +368,7 @@ async function doExport() {
   font-size: 12px;
   padding: 2px 8px;
   margin-left: auto;
+  box-shadow: none;
 }
 .e-preview {
   padding: 20px;
@@ -356,22 +385,35 @@ async function doExport() {
   background: #e03131;
   color: #fff;
   border-color: #e03131;
+  box-shadow: 0 1px 3px rgba(224, 49, 49, 0.35);
+}
+.danger:hover:not(:disabled) {
+  background: #c92a2a;
+  border-color: #c92a2a;
+  color: #fff;
 }
 .toggle {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  padding: 4px 10px;
+  padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  background: var(--panel);
   cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+.toggle:hover {
+  border-color: var(--primary);
 }
 .toggle input {
   margin: 0;
 }
 .toggle.on {
   border-color: var(--primary);
+  background: var(--primary-soft);
   color: var(--primary);
 }
 </style>

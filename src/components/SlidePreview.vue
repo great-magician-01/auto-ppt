@@ -221,8 +221,10 @@ watch(() => props.inspectMode, () => {
   background: #e03131;
   color: #fff;
   font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(224, 49, 49, 0.4);
   z-index: 10;
 }
 </style>

@@ -68,11 +68,11 @@ import Icon from "./components/Icon.vue";
   height: 100vh;
 }
 .topbar {
-  height: 48px;
-  flex: 0 0 48px;
+  height: 52px;
+  flex: 0 0 52px;
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 20px;
   gap: 24px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
@@ -80,27 +80,37 @@ import Icon from "./components/Icon.vue";
 .brand {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-weight: 700;
   font-size: 16px;
+  letter-spacing: 0.5px;
   color: var(--primary) !important;
 }
 .brand-mark {
   flex: 0 0 auto;
   border-radius: 5px;
+  box-shadow: 0 1px 4px rgba(59, 91, 219, 0.35);
 }
 .topbar nav {
   display: flex;
-  gap: 16px;
+  gap: 4px;
 }
 .topbar nav a {
   display: flex;
   align-items: center;
   gap: 5px;
   color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+.topbar nav a:hover {
+  background: #f0f2f5;
+  color: var(--text);
 }
 .topbar nav a.router-link-active {
   color: var(--primary);
+  background: var(--primary-soft);
   font-weight: 600;
 }
 .content {
