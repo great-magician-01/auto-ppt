@@ -33,6 +33,14 @@ jobs:
       - name: 安装前端依赖
         run: npm ci
 
+      # master 推送会复用 latest tag 做滚动预发布,需先清掉旧 release
+      # (tauri-action 不会覆盖同名资产,版本号不变时上传会 422 already_exists)
+      - name: 清理旧的 latest 预发布(仅 master 推送)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete latest --yes --cleanup-tag || true
+
       - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:
